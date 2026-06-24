@@ -118,36 +118,28 @@ class MemoryStore:
         result_lines = []
         in_section = False
         section_header_found = False
-        skip_until_next_header = False
         
         for line in lines:
-            # Check if this is any section header
-            is_section_header = line.strip().startswith('##')
-            
-            if is_section_header:
-                # If we were skipping lines for the target section, stop now
-                if skip_until_next_header:
-                    skip_until_next_header = False
-                
-                # Check if this is the target section header
-                if section_name in line and not section_header_found:
+            # Check if this is the target section header
+            if line.strip().startswith('##') and section_name in line:
+                if not section_header_found:
                     section_header_found = True
                     in_section = True
-                    skip_until_next_header = True
                     result_lines.append(line)
+                    # Add new content after header
                     result_lines.append(new_content)
                     continue
-            
-            # Skip lines that belong to the old target section content
-            if skip_until_next_header:
+            elif line.strip().startswith('##'):
+                if in_section:
+                    in_section = False
+                result_lines.append(line)
                 continue
             
-            # Add lines that are not part of the target section
-            if not in_section or not skip_until_next_header:
+            if not in_section:
                 result_lines.append(line)
         
-        # If section wasn't found, append it
         if not section_header_found:
+            # Section doesn't exist, append it
             result_lines.append(f"\n## {section_name}\n{new_content}")
         
         write_atomic(str(self.memory_path), '\n'.join(result_lines))
