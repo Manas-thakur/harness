@@ -4,27 +4,44 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.py~
-*.py.class
-.Python
-env/
+
+# Dependencies
 .venv/
 venv/
-ENV/
-.ENV
-pip-log.txt
-pip-delete-this-directory.txt
-.tox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
+.env
+.env.local
+.env.*
+
+# Logs
 *.log
-.pytest_cache/
+
+# Temporary files
+*.tmp
+*.lock
+
+# Build artifacts
+build/
+dist/
+target/
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# MyPy
 .mypy_cache/
-.hypothesis/
+
+# PyTest
+.pytest_cache/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
 Thumbs.db
 ```
