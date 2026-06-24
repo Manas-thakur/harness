@@ -67,48 +67,50 @@ class Coordinator:
         Returns:
             Agent response
         """
-        # 1. Fire Hook: UserPromptSubmit
-        hook_decision = self.hooks.fire(
-            "UserPromptSubmit", 
-            data={"prompt": user_prompt}
-        )
-        if hook_decision.get("blocked"):
-            return f"⚠️ Request blocked: {hook_decision.get('reason')}"
-        
-        # 2. Safety Check
-        if self.current_turn >= self.max_turns:
-            return "⚠️ Maximum turn limit reached. Please start a new session."
-        
-        # 3. Intent Routing
-        intent = self._classify_intent(user_prompt)
-        target_agent_type = intent.get("agent", "general")
-        
-        # Map to actual agent
-        agent_map = {
-            "researcher": "researcher",
-            "tutor": "tutor", 
-            "coder": "coder",
-            "dreamer": "dreamer",
-            "general": "researcher"  # Default to researcher for general queries
-        }
-        target_agent_key = agent_map.get(target_agent_type, "researcher")
-        target_agent = self.agents[target_agent_key]
-        
-        # 4. Execute Agent Loop
-        response = self._execute_agent_loop(target_agent, user_prompt)
-        
-        # 5. Context Compaction Check
-        if target_agent.thread.is_context_full():
-            target_agent.thread.compact_old_messages(keep_last_n=3)
-        
-        # 6. Fire Hook: Stop
-        self.hooks.fire("Stop", data={"response": response})
-        
-        self.current_turn += 1
-        self._save_transcript_entry("user", user_prompt)
-        self._save_transcript_entry("assistant", response)
-        
-        return response
+        try:
+            # 1. Fire Hook: UserPromptSubmit
+            hook_decision = self.hooks.fire(
+                "UserPromptSubmit", 
+                context={"prompt": user_prompt}
+            )
+            if hook_decision.get("blocked"):
+                return f"⚠️ Request blocked: {hook_decision.get('reason')}"
+            
+            # 2. Safety Check
+            if self.current_turn >= self.max_turns:
+                return "⚠️ Maximum turn limit reached. Please start a new session."
+            
+            # 3. Intent Routing
+            intent = self._classify_intent(user_prompt)
+            target_agent_type = intent.get("agent", "general")
+            
+            # Map to actual agent
+            agent_map = {
+                "researcher": "researcher",
+                "tutor": "tutor", 
+                "coder": "coder",
+                "dreamer": "dreamer",
+                "general": "researcher"  # Default to researcher for general queries
+            }
+            target_agent_key = agent_map.get(target_agent_type, "researcher")
+            target_agent = self.agents[target_agent_key]
+            
+            # 4. Execute Agent Loop
+            response = self._execute_agent_loop(target_agent, user_prompt)
+            
+            # 5. Context Compaction Check
+            if target_agent.thread.is_context_full():
+                target_agent.thread.compact_old_messages(keep_last_n=3)
+            
+            # 6. Fire Hook: Stop
+            self.hooks.fire("Stop", data={"response": response})
+            
+            self.current_turn += 1
+            return response
+            
+        finally:
+            # Always save transcript entry (even on error)
+            self._save_transcript_entry("user", user_prompt)
     
     def _classify_intent(self, prompt: str) -> dict:
         """
@@ -229,6 +231,7 @@ Return ONLY JSON: {{"agent": "category_name", "reasoning": "brief reason"}}
                 agent_turn += 1
             else:
                 # No tool call, return final response
+                self._save_transcript_entry("assistant", response.strip())
                 return response.strip()
         
         # Reached max turns without final response
