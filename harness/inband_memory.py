@@ -505,6 +505,71 @@ class InBandMemory:
         
         return memory_id
     
+    def save(self, node_id: str, content: str, node_type: str = "fact", 
+             metadata: dict = None) -> str:
+        """
+        Save a memory node (alias for create with simpler API).
+        
+        Args:
+            node_id: Unique identifier for the node
+            content: Markdown content
+            node_type: Type of memory (fact, skill, episode, etc.)
+            metadata: Optional metadata dictionary
+            
+        Returns:
+            The node_id that was saved
+        """
+        # Use provided ID or generate one
+        memory_id = node_id if node_id else self._generate_id(node_type)
+        
+        # Determine storage location based on type
+        type_to_dir = {
+            "facts": "facts",
+            "skills": "skills", 
+            "episodes": "episodes",
+            "threads": "episodes",
+        }
+        subdir = type_to_dir.get(node_type, node_type)
+        base_dir = self.root / "agents" / self.agent_id / subdir
+        base_dir.mkdir(parents=True, exist_ok=True)
+        
+        filename = f"{memory_id}.md"
+        filepath = base_dir / filename
+        
+        # Check write permission
+        self._check_permission('write', str(filepath))
+        
+        # Create document
+        now = datetime.now().isoformat()
+        doc = MemoryDocument(
+            id=memory_id,
+            type=node_type,
+            agent=self.agent_id,
+            created=now,
+            updated=now,
+            version=1,
+            tags=metadata.get('tags', []) if metadata else [],
+            links=[],
+            permissions={},
+            sensitive=False,
+            content=content.strip(),
+            path=filepath
+        )
+        
+        # Add any extra metadata
+        if metadata:
+            for key, value in metadata.items():
+                if hasattr(doc, key):
+                    setattr(doc, key, value)
+        
+        # Write atomically
+        write_atomic(str(filepath), doc.to_markdown())
+        
+        # Update link index
+        self.links._rebuild_index()
+        
+        return memory_id
+    
     def update(self, memory_path: str, content: str, expected_version: int = None) -> bool:
         """
         Update existing memory with optimistic concurrency control.
@@ -692,6 +757,123 @@ class InBandMemory:
                 continue
         
         return graph
+    
+    def list_all(self) -> List[str]:
+        """
+        List all memory node IDs.
+        
+        Returns:
+            List of all memory IDs
+        """
+        node_ids = []
+        for md_file in self.root.rglob("*.md"):
+            try:
+                content = md_file.read_text()
+                frontmatter, _ = parse_frontmatter(content)
+                memory_id = frontmatter.get('id', md_file.stem)
+                node_ids.append(memory_id)
+            except Exception:
+                continue
+        return node_ids
+    
+    def list_by_type(self, node_type: str) -> List[str]:
+        """
+        List memory node IDs filtered by type.
+        
+        Args:
+            node_type: Type of memory (facts, skills, episodes, etc.)
+            
+        Returns:
+            List of memory IDs of the specified type
+        """
+        node_ids = []
+        
+        # Map common type names to directory patterns
+        type_map = {
+            "facts": ["fact_*", "verified_fact_*"],
+            "skills": ["skill_*", "capability_*"],
+            "episodes": ["episode_*", "thread_*", "research_thread_*"],
+        }
+        
+        patterns = type_map.get(node_type, [f"{node_type}_*", "*"])
+        
+        for pattern in patterns:
+            for md_file in self.root.glob(f"**/{pattern}.md"):
+                try:
+                    content = md_file.read_text()
+                    frontmatter, _ = parse_frontmatter(content)
+                    memory_id = frontmatter.get('id', md_file.stem)
+                    mem_type = frontmatter.get('type', '')
+                    
+                    # Match by type in metadata or filename
+                    if node_type in mem_type or node_type in md_file.parent.name.lower():
+                        node_ids.append(memory_id)
+                    elif patterns == [f"{node_type}_*", "*"]:
+                        # If no specific pattern matched, include all
+                        node_ids.append(memory_id)
+                except Exception:
+                    continue
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_ids = []
+        for nid in node_ids:
+            if nid not in seen:
+                seen.add(nid)
+                unique_ids.append(nid)
+        
+        return unique_ids[:50]  # Limit results
+    
+    def get(self, node_id: str) -> Optional[MemoryDocument]:
+        """
+        Get a memory document by ID.
+        
+        Args:
+            node_id: ID of the memory node
+            
+        Returns:
+            MemoryDocument if found, None otherwise
+        """
+        # Search for the file by ID
+        for md_file in self.root.rglob(f"{node_id}.md"):
+            try:
+                return self.read(str(md_file))
+            except Exception:
+                continue
+        
+        # Also try searching by ID in frontmatter
+        for md_file in self.root.rglob("*.md"):
+            try:
+                content = md_file.read_text()
+                frontmatter, _ = parse_frontmatter(content)
+                if frontmatter.get('id') == node_id:
+                    return self.read(str(md_file))
+            except Exception:
+                continue
+        
+        return None
+    
+    def initialize(self) -> None:
+        """
+        Initialize the memory store, creating necessary directories.
+        """
+        # Create base directories for different memory types
+        base_dirs = [
+            self.root / "agents" / self.agent_id / "facts",
+            self.root / "agents" / self.agent_id / "skills", 
+            self.root / "agents" / self.agent_id / "episodes",
+            self.root / "agents" / self.agent_id / "archive",
+        ]
+        
+        for dir_path in base_dirs:
+            dir_path.mkdir(parents=True, exist_ok=True)
+        
+        # Rebuild link index
+        self.links._rebuild_index()
+
+
+# Alias for backward compatibility with memory.py
+InBandMemoryStore = InBandMemory
 
 
 # Example usage
