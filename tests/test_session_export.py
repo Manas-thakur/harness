@@ -1,0 +1,73 @@
+from pathlib import Path
+
+from phi_agent import (
+    AssistantMessage,
+    CompactionEntry,
+    LeafEntry,
+    MessageEntry,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
+from phi_coding.session_export import export_session_html, render_session_html
+
+
+def test_render_session_html_preserves_branch_tree() -> None:
+    entries = [
+        MessageEntry(id="root", message=UserMessage(content="Start <session>")),
+        MessageEntry(
+            id="left",
+            parent_id="root",
+            message=AssistantMessage(content="Left branch"),
+        ),
+        MessageEntry(
+            id="right",
+            parent_id="root",
+            message=AssistantMessage(
+                content="Right branch",
+                tool_calls=[ToolCall(id="call-1", name="read", arguments={"path": "README.md"})],
+            ),
+        ),
+        MessageEntry(
+            id="tool",
+            parent_id="right",
+            message=ToolResultMessage(
+                tool_call_id="call-1",
+                name="read",
+                content="File contents",
+                ok=True,
+                data={"bytes": 13},
+            ),
+        ),
+        CompactionEntry(
+            id="compact",
+            parent_id="tool",
+            summary="The right branch was compacted.",
+            replaces_entry_ids=["root", "right", "tool"],
+        ),
+        LeafEntry(id="leaf", parent_id="compact", entry_id="compact"),
+    ]
+
+    html = render_session_html(entries, title="Test Export", source="/tmp/session.jsonl")
+
+    assert "<title>Test Export</title>" in html
+    assert "Source: <code>/tmp/session.jsonl</code>" in html
+    assert 'id="entry-root"' in html
+    assert 'id="entry-left"' in html
+    assert 'id="entry-right"' in html
+    assert 'id="entry-compact"' in html
+    assert "Start &lt;session&gt;" in html
+    assert "Right branch [read]" in html
+    assert "active-path" in html
+    assert "active-leaf" in html
+    assert "Replaces entries" in html
+
+
+def test_export_session_html_writes_file(tmp_path: Path) -> None:
+    entries = [MessageEntry(id="root", message=UserMessage(content="Hello"))]
+    output_path = tmp_path / "session.html"
+
+    result = export_session_html(entries, output_path, title="Session")
+
+    assert result == output_path
+    assert output_path.read_text(encoding="utf-8").startswith("<!doctype html>")

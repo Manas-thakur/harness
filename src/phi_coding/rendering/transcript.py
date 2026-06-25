@@ -1,0 +1,104 @@
+"""Human-readable streaming transcript renderer."""
+
+import typer
+from rich.console import Console
+from rich.text import Text
+
+from phi_agent import (
+    AgentEndEvent,
+    AgentEvent,
+    ErrorEvent,
+    MessageDeltaEvent,
+    MessageEndEvent,
+    MessageStartEvent,
+    RetryEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
+)
+from phi_coding.tui.state import format_tool_call_block
+
+
+class TranscriptRenderer:
+    """Render assistant deltas live and tool activity to stderr."""
+
+    def __init__(self) -> None:
+        self._assistant_started = False
+        self._assistant_ended = False
+        self._failed = False
+        self._console = Console(stderr=True, highlight=False)
+
+    def render(self, event: AgentEvent) -> None:
+        """Render one agent event."""
+        if isinstance(event, MessageStartEvent):
+            self._assistant_started = False
+            self._assistant_ended = False
+            return
+
+        if isinstance(event, MessageDeltaEvent):
+            self._assistant_started = True
+            typer.echo(event.delta, nl=False)
+            return
+
+        if isinstance(event, ToolExecutionStartEvent):
+            self._ensure_assistant_newline()
+            self._console.print(Text(format_tool_call_block(event.tool_call), style="cyan"))
+            return
+
+        if isinstance(event, ToolExecutionUpdateEvent):
+            self._ensure_assistant_newline()
+            self._console.print(Text(f"… {event.message}", style="bright_black"))
+            return
+
+        if isinstance(event, RetryEvent):
+            self._ensure_assistant_newline()
+            self._console.print(Text(f"… {event.message}", style="bright_black"))
+            return
+
+        if isinstance(event, ToolExecutionEndEvent):
+            status = "✓" if event.result.ok else "✗"
+            style = "green" if event.result.ok else "red"
+            self._print_tool_line(status, event.result.name, style=style)
+            if event.result.content:
+                self._print_tool_content(event.result.content)
+            return
+
+        if isinstance(event, ErrorEvent):
+            if not event.recoverable:
+                self._failed = True
+            self._ensure_assistant_newline()
+            self._console.print(Text(f"Error: {event.message}", style="red"))
+            return
+
+        if isinstance(event, MessageEndEvent | AgentEndEvent):
+            self._ensure_assistant_newline(final=True)
+
+    def finish(self) -> bool:
+        """Return whether the rendered run succeeded."""
+        return not self._failed
+
+    def _ensure_assistant_newline(self, *, final: bool = False) -> None:
+        if self._assistant_started and not self._assistant_ended:
+            typer.echo()
+            self._assistant_ended = True
+        elif final and not self._assistant_started:
+            self._assistant_ended = True
+
+    def _print_tool_line(
+        self,
+        marker: str,
+        name: str,
+        detail: str | None = None,
+        *,
+        style: str,
+    ) -> None:
+        line = Text()
+        line.append(marker, style=style)
+        line.append(f" {name}", style=style)
+        if detail:
+            line.append(f" {detail}", style="bright_black")
+        self._console.print(line)
+
+    def _print_tool_content(self, content: str) -> None:
+        for line in content.splitlines() or [""]:
+            self._console.print(Text(f"  {line}", style="white"))

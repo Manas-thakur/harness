@@ -5,10 +5,18 @@ __pycache__/
 .venv/
 venv/
 .eggs/
+build/
+dist/
+wheels/
 
-# Test / coverage
+# Test / coverage / tooling caches
 .coverage
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Docs build
+site/
 
 # Agent runtime artifacts
 sessions/
