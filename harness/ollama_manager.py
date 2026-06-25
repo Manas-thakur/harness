@@ -166,7 +166,7 @@ async def health_check():
             )
             stdout, _ = await proc.communicate()
             print(f"  ✓ Version: {stdout.decode().strip()}")
-        except:
+        except Exception:
             print("  ⚠ Version: Unknown")
 
         # Count models
@@ -179,7 +179,7 @@ async def health_check():
             data = json.loads(stdout)
             count = len(data.get('models', []))
             print(f"  ✓ Models installed: {count}")
-        except:
+        except Exception:
             print("  ⚠ Models: Unknown")
 
         print("\n✅ Ollama is healthy and ready!")

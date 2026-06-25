@@ -6,7 +6,7 @@ Provides zero-cost tools for web search, file I/O, Git operations, and more.
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Callable
-from harness.file_ops import write_atomic
+from harness.file_ops import write_atomic, read_file_safe
 
 
 # Default character limit for tool outputs (VRAM protection)
