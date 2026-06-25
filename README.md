@@ -346,6 +346,10 @@ Create `.env` file (optional):
 # Ollama settings
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=qwen3:8b
+OLLAMA_NUM_CTX=8192            # context window (must be set; Ollama defaults to ~2048)
+
+# Ollama Cloud (optional, opt-in — see below)
+OLLAMA_API_KEY=               # your Ollama API key for cloud inference
 
 # Tool limits
 MAX_TOOL_CHARS=4000
@@ -355,6 +359,37 @@ CONTEXT_COMPACT_THRESHOLD=24000
 # GitHub (optional)
 GITHUB_TOKEN=ghp_your_token_here
 ```
+
+### Choosing a model
+
+menace works with **any** model available to your Ollama host. Set one at launch
+(`OLLAMA_MODEL=…`) or switch live in the TUI:
+
+```
+/model                       # show current + locally installed models
+/model qwen3:4b              # switch to any local model (pull it first)
+```
+
+### Ollama Cloud (faster, larger models — opt-in)
+
+For more speed/quality than an 8GB GPU allows, run a hosted model on **Ollama
+Cloud** instead of degrading the local experience. This is **opt-in** and changes
+the project's "fully local / private" property: prompts are sent to Ollama's
+servers, and cloud usage requires an Ollama account (free tier with limits).
+
+```bash
+ollama signin                       # or: export OLLAMA_API_KEY=<your key>
+```
+
+Then pick a cloud model (conventionally suffixed `-cloud`):
+
+```
+/model qwen3-coder:480b-cloud
+```
+
+The status line shows **cloud** vs **local** so you always know where inference
+runs. Local stays the default; nothing is sent anywhere until you choose a cloud
+model or set an API key.
 
 ### Hook Configuration
 
