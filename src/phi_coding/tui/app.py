@@ -1951,7 +1951,8 @@ class PhiTuiApp(App[None]):
                     prompt.text = raw_text
                     prompt.move_cursor(_text_end_location(raw_text))
                     self._notify(
-                        "Wait for the current agent turn and queued messages to finish before compacting.",
+                        "Wait for the current agent turn and queued messages to finish "
+                        "before compacting.",
                         severity="warning",
                     )
                     return

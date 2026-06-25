@@ -1081,15 +1081,6 @@ def _validate_thinking_config(
         )
 
 
-def _reject_unimplemented_thinking_config(
-    *,
-    provider_type: str,
-    thinking_levels: tuple[ThinkingLevel, ...] | None,
-) -> None:
-    if thinking_levels is not None:
-        raise ProviderConfigError(f"{provider_type} thinking controls are not implemented yet")
-
-
 def _optional_string(value: object, field_name: str) -> str | None:
     if value is None:
         return None
@@ -1108,15 +1099,6 @@ def _string(value: object, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ProviderConfigError(f"Provider field must be a non-empty string: {field_name}")
     return value.strip()
-
-
-def _string_tuple(value: object, field_name: str) -> tuple[str, ...]:
-    if not isinstance(value, list) or not value:
-        raise ProviderConfigError(f"Provider field must be a non-empty string list: {field_name}")
-    items = tuple(item.strip() for item in value if isinstance(item, str) and item.strip())
-    if len(items) != len(value):
-        raise ProviderConfigError(f"Provider field must be a string list: {field_name}")
-    return items
 
 
 def _optional_string_tuple(value: object, field_name: str) -> tuple[str, ...]:

@@ -10,10 +10,9 @@ from phi_coding.prompt_templates import PromptTemplate
 from phi_coding.provider_catalog import BUILTIN_PROVIDER_CATALOG, builtin_provider_entry
 from phi_coding.reload import CodingReloadSummary, ReloadCategorySummary
 from phi_coding.resources import ResourceDiagnostic
-from phi_coding.session_manager import CodingSessionRecord, SessionManager
+from phi_coding.session_manager import SessionManager
 from phi_coding.skills import Skill
 from phi_coding.system_prompt import ProjectContextFile
-from phi_coding.thinking import normalize_thinking_level
 
 BUILTIN_TUI_THEME_NAMES = ("phi-dark", "phi-light", "high-contrast")
 
@@ -333,13 +332,6 @@ def create_default_command_registry() -> CommandRegistry:
     return registry
 
 
-def _help_command(context: CommandContext) -> CommandResult:
-    lines = ["Available commands:"]
-    for command in context.registry.list_commands():
-        lines.append(f"{command.usage}\t{command.description}")
-    return CommandResult(handled=True, message="\n".join(lines))
-
-
 def _exit_command(context: CommandContext) -> CommandResult:
     return CommandResult(handled=True, exit_requested=True, message="Exiting session.")
 
@@ -417,40 +409,6 @@ def _hotkeys_command(context: CommandContext) -> CommandResult:
     return CommandResult(handled=True, message="\n".join(lines))
 
 
-def _skills_command(context: CommandContext) -> CommandResult:
-    if not context.session.skills:
-        lines = ["No skills loaded."]
-        if context.session.resource_diagnostics:
-            lines.append("")
-            lines.extend(_format_diagnostics(context.session.resource_diagnostics, kind="skill"))
-        return CommandResult(handled=True, message="\n".join(lines))
-
-    lines = ["Available skills:"]
-    for skill in sorted(context.session.skills, key=lambda item: item.name):
-        description = skill.description or "No description"
-        lines.append(f"- {skill.name}: {description}")
-    lines.append("Use a skill with /skill:<name> [request].")
-    if context.session.resource_diagnostics:
-        lines.append("")
-        lines.extend(_format_diagnostics(context.session.resource_diagnostics, kind="skill"))
-    return CommandResult(handled=True, message="\n".join(lines))
-
-
-def _resources_command(context: CommandContext) -> CommandResult:
-    session = context.session
-    lines = [
-        f"Skills: {len(session.skills)}",
-        f"Prompt templates: {len(session.prompt_templates)}",
-        f"Context files: {len(session.context_files)}",
-    ]
-    if session.resource_diagnostics:
-        lines.append("")
-        lines.extend(_format_diagnostics(session.resource_diagnostics))
-    else:
-        lines.append("Resource diagnostics: none")
-    return CommandResult(handled=True, message="\n".join(lines))
-
-
 def _reload_command(context: CommandContext) -> CommandResult:
     try:
         summary = context.session.reload()
@@ -461,23 +419,6 @@ def _reload_command(context: CommandContext) -> CommandResult:
         handled=True,
         message=_format_reload_summary(summary),
     )
-
-
-def _context_command(context: CommandContext) -> CommandResult:
-    session = context.session
-    if not session.context_files:
-        lines = ["No project context files loaded."]
-        if session.resource_diagnostics:
-            lines.append("")
-            lines.extend(_format_diagnostics(session.resource_diagnostics, kind="context"))
-        return CommandResult(handled=True, message="\n".join(lines))
-
-    lines = ["Active project context files:"]
-    lines.extend(f"- {context_file.path}" for context_file in session.context_files)
-    if session.resource_diagnostics:
-        lines.append("")
-        lines.extend(_format_diagnostics(session.resource_diagnostics, kind="context"))
-    return CommandResult(handled=True, message="\n".join(lines))
 
 
 def _skill_command(context: CommandContext) -> CommandResult:
@@ -541,21 +482,6 @@ def _name_command(context: CommandContext) -> CommandResult:
     return CommandResult(handled=True, message=f"Session renamed: {updated.title}")
 
 
-def _format_sessions(context: CommandContext) -> str:
-    manager = context.session.session_manager
-    if manager is None:
-        return "Session manager is not available."
-
-    records = manager.list_sessions(context.session.cwd)
-    if not records:
-        return "No sessions found."
-
-    lines = ["Indexed sessions:"]
-    for record in records:
-        lines.append(_format_session_record(record))
-    return "\n".join(lines)
-
-
 def _model_command(context: CommandContext) -> CommandResult:
     refresh_error = _refresh_provider_settings(context.session)
     if refresh_error is not None:
@@ -585,43 +511,6 @@ def _scoped_models_command(context: CommandContext) -> CommandResult:
     if context.args:
         return CommandResult(handled=True, message="Usage: /scoped-models")
     return CommandResult(handled=True, scoped_models_picker_requested=True)
-
-
-def _thinking_command(context: CommandContext) -> CommandResult:
-    session = context.session
-    available = tuple(session.available_thinking_levels)
-    if not context.args:
-        lines = _thinking_status_lines(session)
-        if available:
-            lines.append(f"Available modes: {', '.join(available)}")
-        else:
-            lines.insert(1, f"Current model: {session.provider_name}:{session.model}")
-        return CommandResult(handled=True, message="\n".join(lines))
-
-    if not available:
-        message = f"Thinking controls are unavailable for {session.provider_name}:{session.model}"
-        reason = _thinking_unavailable_reason(session)
-        if reason:
-            message = f"{message}: {reason}"
-        return CommandResult(
-            handled=True,
-            message=message,
-        )
-    try:
-        level = normalize_thinking_level(context.args)
-    except ValueError as exc:
-        return CommandResult(handled=True, message=str(exc))
-    if level not in available:
-        modes = ", ".join(available)
-        return CommandResult(
-            handled=True,
-            message=(
-                f"Thinking mode {level} is not available for "
-                f"{session.provider_name}:{session.model}\n"
-                f"Available modes: {modes}"
-            ),
-        )
-    return CommandResult(handled=True, thinking_level=level)
 
 
 def _thinking_status_lines(session: CommandSession) -> list[str]:
@@ -685,22 +574,6 @@ def _logout_command(context: CommandContext) -> CommandResult:
         return CommandResult(handled=True, logout_provider=entry.name)
 
     return CommandResult(handled=True, logout_picker_requested=True)
-
-
-def _format_session_record(record: CodingSessionRecord) -> str:
-    title = record.title or "Untitled"
-    return f"- {record.id}: {title} ({record.model}) {record.cwd}"
-
-
-def _format_diagnostics(
-    diagnostics: Sequence[ResourceDiagnostic], *, kind: str | None = None
-) -> list[str]:
-    filtered = [diagnostic for diagnostic in diagnostics if kind is None or diagnostic.kind == kind]
-    if not filtered:
-        return ["Resource diagnostics: none"]
-    lines = ["Resource diagnostics:"]
-    lines.extend(f"- {diagnostic.format()}" for diagnostic in filtered)
-    return lines
 
 
 def _refresh_provider_settings(session: CommandSession) -> CommandResult | None:

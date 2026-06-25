@@ -82,19 +82,27 @@ def create_search_web_tool_definition() -> ToolDefinition:
             results = await anyio.to_thread.run_sync(_run_search, query, max_results)
         except Exception as exc:  # noqa: BLE001 - surface backend/network errors
             return AgentToolResult(
-                tool_call_id="", name="search_web", ok=False,
-                content=f"Search failed (network or backend error): {exc}", error=str(exc),
+                tool_call_id="",
+                name="search_web",
+                ok=False,
+                content=f"Search failed (network or backend error): {exc}",
+                error=str(exc),
             )
 
         if results is None:
             msg = "Web search backend not installed. Run: pip install ddgs"
-            return AgentToolResult(tool_call_id="", name="search_web", ok=False,
-                                   content=msg, error=msg)
+            return AgentToolResult(
+                tool_call_id="", name="search_web", ok=False, content=msg, error=msg
+            )
         if not results:
             return AgentToolResult(
-                tool_call_id="", name="search_web", ok=True,
-                content=(f"No results found for: {query}. Try a simpler or differently "
-                         "worded query; do not guess the answer."),
+                tool_call_id="",
+                name="search_web",
+                ok=True,
+                content=(
+                    f"No results found for: {query}. Try a simpler or differently "
+                    "worded query; do not guess the answer."
+                ),
             )
 
         lines = [
@@ -107,8 +115,11 @@ def create_search_web_tool_definition() -> ToolDefinition:
             url = item.get("href") or item.get("url", "")
             lines.extend([f"{index}. {title}", f"   {body}", f"   URL: {url}\n"])
         return AgentToolResult(
-            tool_call_id="", name="search_web", ok=True,
-            content=_truncate("\n".join(lines)), data={"count": len(results)},
+            tool_call_id="",
+            name="search_web",
+            ok=True,
+            content=_truncate("\n".join(lines)),
+            data={"count": len(results)},
         )
 
     return ToolDefinition(
@@ -178,16 +189,28 @@ def create_fetch_url_tool_definition() -> ToolDefinition:
                 response = await client.get(url)
                 response.raise_for_status()
         except Exception as exc:  # noqa: BLE001 - surface network/HTTP errors
-            return AgentToolResult(tool_call_id="", name="fetch_url", ok=False,
-                                   content=f"Error fetching {url}: {exc}", error=str(exc))
+            return AgentToolResult(
+                tool_call_id="",
+                name="fetch_url",
+                ok=False,
+                content=f"Error fetching {url}: {exc}",
+                error=str(exc),
+            )
 
         text = await anyio.to_thread.run_sync(_html_to_text, response.text)
         if not text.strip():
-            return AgentToolResult(tool_call_id="", name="fetch_url", ok=True,
-                                   content=f"Fetched {url} but found no readable text.")
+            return AgentToolResult(
+                tool_call_id="",
+                name="fetch_url",
+                ok=True,
+                content=f"Fetched {url} but found no readable text.",
+            )
         return AgentToolResult(
-            tool_call_id="", name="fetch_url", ok=True,
-            content=_truncate(f"Content of {url}:\n\n{text}"), data={"url": url},
+            tool_call_id="",
+            name="fetch_url",
+            ok=True,
+            content=_truncate(f"Content of {url}:\n\n{text}"),
+            data={"url": url},
         )
 
     return ToolDefinition(
@@ -242,13 +265,23 @@ def create_read_pdf_tool_definition() -> ToolDefinition:
                 tool_call_id="", name="read_pdf", ok=False, content=msg, error=msg
             )
         except Exception as exc:  # noqa: BLE001 - surface parse errors
-            return AgentToolResult(tool_call_id="", name="read_pdf", ok=False,
-                                   content=f"Error reading PDF: {exc}", error=str(exc))
+            return AgentToolResult(
+                tool_call_id="",
+                name="read_pdf",
+                ok=False,
+                content=f"Error reading PDF: {exc}",
+                error=str(exc),
+            )
         if not text.strip():
-            return AgentToolResult(tool_call_id="", name="read_pdf", ok=True,
-                                   content=f"Read {path} but found no extractable text.")
-        return AgentToolResult(tool_call_id="", name="read_pdf", ok=True,
-                               content=_truncate(text), data={"path": path})
+            return AgentToolResult(
+                tool_call_id="",
+                name="read_pdf",
+                ok=True,
+                content=f"Read {path} but found no extractable text.",
+            )
+        return AgentToolResult(
+            tool_call_id="", name="read_pdf", ok=True, content=_truncate(text), data={"path": path}
+        )
 
     return ToolDefinition(
         name="read_pdf",

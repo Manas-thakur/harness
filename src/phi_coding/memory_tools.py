@@ -51,9 +51,7 @@ def create_update_profile_tool_definition(store: MemoryStore) -> ToolDefinition:
         content = _str_arg(arguments, "content")
         raw_section = arguments.get("section")
         section = (
-            raw_section.strip()
-            if isinstance(raw_section, str) and raw_section.strip()
-            else "About"
+            raw_section.strip() if isinstance(raw_section, str) and raw_section.strip() else "About"
         )
         message = await anyio.to_thread.run_sync(store.append_to_section, section, content)
         return AgentToolResult(tool_call_id="", name="update_profile", ok=True, content=message)
@@ -130,11 +128,16 @@ def create_recall_tool_definition(store: MemoryStore) -> ToolDefinition:
         query = _str_arg(arguments, "query")
         matches = await anyio.to_thread.run_sync(store.search, query)
         if not matches:
-            return AgentToolResult(tool_call_id="", name="recall", ok=True,
-                                   content=f"No stored memory matches: {query}")
+            return AgentToolResult(
+                tool_call_id="",
+                name="recall",
+                ok=True,
+                content=f"No stored memory matches: {query}",
+            )
         body = "\n".join(f"- {m}" for m in matches)
-        return AgentToolResult(tool_call_id="", name="recall", ok=True, content=body,
-                               data={"count": len(matches)})
+        return AgentToolResult(
+            tool_call_id="", name="recall", ok=True, content=body, data={"count": len(matches)}
+        )
 
     return ToolDefinition(
         name="recall",

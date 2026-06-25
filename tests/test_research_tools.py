@@ -44,9 +44,12 @@ def _install_fake_ddgs(monkeypatch, *, results=None, raise_exc=None) -> None:
 
 @pytest.mark.anyio
 async def test_search_web_returns_formatted_results(monkeypatch) -> None:
-    _install_fake_ddgs(monkeypatch, results=[
-        {"title": "F1 News", "body": "Verstappen won.", "href": "http://x"},
-    ])
+    _install_fake_ddgs(
+        monkeypatch,
+        results=[
+            {"title": "F1 News", "body": "Verstappen won.", "href": "http://x"},
+        ],
+    )
     tool = create_search_web_tool_definition()
     result = await tool.executor({"query": "latest f1"})
     assert result.ok

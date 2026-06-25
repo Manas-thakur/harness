@@ -113,7 +113,5 @@ def test_core_memory_injects_into_system_prompt(tmp_path: Path) -> None:
     store = _store(tmp_path)
     store.append_to_section("About", "Manas, building menace")
     core = store.read_core()
-    prompt = build_system_prompt(
-        BuildSystemPromptOptions(cwd=tmp_path, append_system_prompt=core)
-    )
+    prompt = build_system_prompt(BuildSystemPromptOptions(cwd=tmp_path, append_system_prompt=core))
     assert "Manas, building menace" in prompt

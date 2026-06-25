@@ -52,6 +52,8 @@ from phi_coding.diagnostics import (
     AgentCallDiagnosticLogger,
     new_agent_call_run_id,
 )
+from phi_coding.memory import MemoryStore, default_memory_path
+from phi_coding.memory_tools import create_memory_tools
 from phi_coding.paths import PhiPaths
 from phi_coding.prompt_templates import (
     PromptTemplate,
@@ -73,6 +75,7 @@ from phi_coding.provider_config import (
 )
 from phi_coding.provider_runtime import ClosableModelProvider, create_model_provider
 from phi_coding.reload import CodingReloadSummary, ReloadCategorySummary
+from phi_coding.research_tools import create_research_tools
 from phi_coding.resources import (
     PhiResourcePaths,
     ResourceDiagnostic,
@@ -98,9 +101,6 @@ from phi_coding.thinking import (
     next_thinking_level,
     normalize_thinking_level,
 )
-from phi_coding.memory import MemoryStore, default_memory_path
-from phi_coding.memory_tools import create_memory_tools
-from phi_coding.research_tools import create_research_tools
 from phi_coding.tools import create_bash_tool, create_coding_tools
 
 StreamingBehavior = Literal["steer", "follow_up"]
@@ -271,9 +271,7 @@ class CodingSession:
         append_system_prompt = config.append_system_prompt
         if core_memory:
             append_system_prompt = (
-                f"{append_system_prompt}\n\n{core_memory}"
-                if append_system_prompt
-                else core_memory
+                f"{append_system_prompt}\n\n{core_memory}" if append_system_prompt else core_memory
             )
         system = (
             config.system

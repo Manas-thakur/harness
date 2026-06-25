@@ -3,7 +3,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from phi_agent.types import JSONValue
 from phi_coding.paths import PhiPaths
 
 
@@ -164,8 +163,3 @@ def derive_description(content: str) -> str | None:
             return stripped.lstrip("#").strip() or None
         return stripped
     return None
-
-
-def metadata_to_json(metadata: dict[str, str]) -> dict[str, JSONValue]:
-    """Convert string metadata into JSON-like values."""
-    return dict(metadata)
