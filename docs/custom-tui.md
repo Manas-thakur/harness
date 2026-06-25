@@ -121,8 +121,7 @@ If `result.handled` is true, the frontend should apply the requested UI effect
 or show `result.message` outside the durable conversation when the message is
 command reference or status text. The built-in Textual frontend uses
 notifications for short command results and a dismissible modal for multi-line
-output such as `/help`, `/skills`, `/resume`, `/status`, `/resources`, and
-`/context`.
+output such as `/session`, `/resume`, `/hotkeys`, and `/tree`.
 
 Existing result fields include:
 

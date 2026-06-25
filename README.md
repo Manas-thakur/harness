@@ -25,6 +25,83 @@ src/phi_coding  the menace app: coding + research + memory tools, TUI, commands
 - **Run on any model** — any local Ollama model, Ollama Cloud, or any OpenAI-/
   Anthropic-compatible provider, switchable live with `/model`.
 
+## Architecture
+
+Three layers with dependencies pointing **down** only: the provider layer knows
+nothing about the harness, and the harness knows nothing about the app, the TUI,
+or where tools and resources come from.
+
+```mermaid
+flowchart TB
+    you([You])
+
+    subgraph coding["src/phi_coding — the menace app"]
+        direction TB
+        ui["Textual TUI + Typer CLI<br/>slash commands · themes · print mode"]
+        cs["CodingSession<br/>builds system prompt · loads skills/context · JSONL persistence"]
+        subgraph tools["Tools (typed AgentTool)"]
+            ct["coding<br/>read · write · edit · bash"]
+            rt["research<br/>search_web · fetch_url · read_pdf"]
+            mt["memory<br/>remember · recall · update_profile"]
+        end
+        store["MemoryStore<br/>markdown profile + facts (per project)"]
+    end
+
+    subgraph agent["src/phi_agent — portable harness"]
+        direction TB
+        harness["AgentHarness<br/>owns transcript · steer/follow-up queues · event subscribers"]
+        loop["run_agent_loop<br/>pure async event stream · tool dispatch"]
+        sessions["JSONL sessions<br/>append-only · tree/branch · compaction"]
+    end
+
+    subgraph ai["src/phi_ai — provider layer"]
+        direction TB
+        provider["ModelProvider.stream_response()<br/>provider-neutral streaming + retry"]
+        impls["Ollama local · Ollama Cloud · OpenAI · OpenAI Codex · Anthropic · OpenRouter · Hugging Face · Fake"]
+    end
+
+    you <--> ui
+    ui --> cs
+    cs --> harness
+    cs -. injects core profile .-> store
+    harness --> loop
+    harness <--> sessions
+    loop -. executes .-> tools
+    tools -. memory tools .-> store
+    loop --> provider
+    provider --> impls
+```
+
+**The agent loop** is the heart of `phi_agent` — a pure async generator that
+streams provider-neutral events and dispatches tools until the model stops
+calling them:
+
+```mermaid
+sequenceDiagram
+    participant App as phi_coding (TUI/CLI)
+    participant H as AgentHarness
+    participant L as run_agent_loop
+    participant P as ModelProvider
+    participant T as Tools
+
+    App->>H: prompt("…")
+    H->>L: run with transcript + tools
+    loop until no tool calls
+        L->>P: stream_response(messages, tools)
+        P-->>L: text/thinking deltas + tool calls
+        L-->>App: stream agent events (render live)
+        alt model requested tools
+            L->>T: execute tool calls
+            T-->>L: AgentToolResult (typed)
+        end
+    end
+    L-->>App: final assistant message
+    Note over H,App: subscribers persist JSONL session entries
+```
+
+The `Fake` provider scripts these event streams, which is how the whole stack is
+tested offline with no network or Ollama.
+
 ## Requirements
 
 - Python **3.14+**
