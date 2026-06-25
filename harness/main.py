@@ -33,9 +33,8 @@ async def run_agent(config: AgentConfig, args):
     """Run the agent loop."""
     # Initialize memory
     memory = InBandMemory(
-        base_dir=config.memory.base_dir,
         agent_id=args.agent_id,
-        shard=args.shard
+        memory_root=config.memory.memory_dir
     )
     memory.initialize()
 
@@ -47,9 +46,8 @@ async def run_agent(config: AgentConfig, args):
 
     # Initialize coordinator
     coordinator = Coordinator(
-        config=config,
-        memory=memory,
-        llm_client=llm
+        model=config.model.model_name,
+        max_turns=config.agent.max_iterations
     )
 
     # Run dashboard if enabled
@@ -96,7 +94,7 @@ def main():
 
     # Override config with args
     if args.model:
-        config.model.name = args.model
+        config.model.model_name = args.model
 
     # Run async
     try:
