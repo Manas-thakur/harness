@@ -1,1 +1,19 @@
-Nothing should be ignored based on the provided file changes. The only modified file is 'harness/main.py', which is a source code file and should not be added to .gitignore. No build artifacts, dependencies, or temporary files are present in the changes.
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.eggs/
+
+# Test / coverage
+.coverage
+.pytest_cache/
+
+# Agent runtime artifacts
+sessions/
+dreams/
+versions/
+workspace/
+*.md.lock
+.agent_env.sh

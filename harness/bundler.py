@@ -75,11 +75,9 @@ if ! command -v ollama &> /dev/null; then
     echo "⚠ Ollama not found. Install from https://ollama.com"
 fi
 
-# Run agent
-python3 -m harness.main \\
-    --local \\
-    --dashboard \\
-    --bundle "$SCRIPT_DIR"
+# Launch the TUI (single interface). Ensure the harness package is importable.
+export PYTHONPATH="${{PYTHONPATH:-}}:$SCRIPT_DIR"
+python3 -m harness.tui
 
 """)
     start_sh.chmod(0o755)
@@ -98,11 +96,9 @@ if %errorlevel% neq 0 (
     echo ⚠ Ollama not found. Install from https://ollama.com
 )
 
-REM Run agent
-python -m harness.main ^
-    --local ^
-    --dashboard ^
-    --bundle "%~dp0"
+REM Launch the TUI (single interface)
+set PYTHONPATH=%PYTHONPATH%;%~dp0
+python -m harness.tui
 
 pause
 """)
@@ -111,7 +107,7 @@ pause
     # Create .agent_env.sh
     env_sh = bundle_path / ".agent_env.sh"
     env_sh.write_text(f"""# Environment variables for {name}
-export AGENT_MODEL_NAME="llama3.1"
+export AGENT_MODEL_NAME="qwen2.5:7b"
 export AGENT_MEMORY_DIR="{bundle_path}/memory"
 export AGENT_DASHBOARD_ENABLED="true"
 export AGENT_LOCAL_MODE="true"

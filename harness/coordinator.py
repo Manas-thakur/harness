@@ -21,18 +21,20 @@ class Coordinator:
     """
 
     def __init__(
-        self, 
-        model: str = "qwen2.5:7b", 
-        max_turns: int = 20
+        self,
+        model: str = "qwen2.5:7b",
+        max_turns: int = 20,
+        mock: bool = None,
     ):
         """
         Initialize coordinator.
-        
+
         Args:
             model: LLM model name
             max_turns: Maximum turns per session
+            mock: Force offline mock mode (None = auto-detect Ollama)
         """
-        self.llm = LocalLLMClient(model=model)
+        self.llm = LocalLLMClient(model=model, mock=mock)
         self.max_turns = max_turns
         self.current_turn = 0
 
@@ -55,6 +57,152 @@ class Coordinator:
 
         # Session transcript storage
         self.session_transcript: List[Dict] = []
+
+        # Last agent that handled a request (for the TUI status line)
+        self.last_agent: Optional[str] = None
+
+    # Map intent categories to concrete agents.
+    AGENT_MAP = {
+        "researcher": "researcher",
+        "tutor": "tutor",
+        "coder": "coder",
+        "dreamer": "dreamer",
+        "general": "researcher",
+    }
+
+    def chat(self, user_prompt: str, on_event=None, on_token=None) -> str:
+        """
+        Streaming entry point used by the TUI.
+
+        Args:
+            user_prompt: User's input text.
+            on_event: Optional callback ``fn(event_type, data)`` for routing,
+                tool calls, blocks and errors.
+            on_token: Optional callback ``fn(chunk)`` for streamed response text.
+
+        Returns:
+            The final assistant response.
+        """
+        emit = on_event or (lambda *a, **k: None)
+
+        # 1. Fire Hook: UserPromptSubmit
+        hook_decision = self.hooks.fire("UserPromptSubmit", {"prompt": user_prompt})
+        if hook_decision.get("blocked"):
+            reason = hook_decision.get("reason", "blocked by hook")
+            emit("blocked", {"reason": reason})
+            return f"⚠️ Request blocked: {reason}"
+
+        # 2. Safety Check
+        if self.current_turn >= self.max_turns:
+            return "⚠️ Maximum turn limit reached. Please start a new session."
+
+        # 3. Intent Routing
+        intent = self._classify_intent(user_prompt)
+        target_key = self.AGENT_MAP.get(intent.get("agent", "general"), "researcher")
+        target_agent = self.agents[target_key]
+        self.last_agent = target_key
+        emit("route", {"agent": target_key, "reasoning": intent.get("reasoning", "")})
+
+        # 4. Execute streaming agent loop
+        response = self._execute_agent_loop_streaming(
+            target_agent, user_prompt, emit, on_token
+        )
+
+        # 5. Context Compaction Check
+        if target_agent.thread.is_context_full():
+            target_agent.thread.compact_old_messages(keep_last_n=3)
+
+        # 6. Fire Hook: Stop
+        self.hooks.fire("Stop", {"response": response})
+
+        self.current_turn += 1
+        self._save_transcript_entry("user", user_prompt)
+        self._save_transcript_entry("assistant", response)
+        return response
+
+    def _execute_agent_loop_streaming(self, agent, user_prompt, emit, on_token) -> str:
+        """
+        Agent loop with token streaming for the final answer.
+
+        Tool calls (JSON beginning with ``{``) are buffered silently and
+        executed; plain-text answers are streamed to ``on_token`` as they
+        arrive so the TUI can render them live.
+        """
+        emit_token = on_token or (lambda chunk: None)
+
+        context = agent.get_active_context()
+        context.append({"role": "user", "content": user_prompt})
+        agent.thread.add_message("user", user_prompt)
+
+        max_agent_turns = 10
+        for _ in range(max_agent_turns):
+            buffer = ""
+            looks_like_tool = None
+            try:
+                for chunk in self.llm.generate_stream(context, temperature=0.7):
+                    buffer += chunk
+                    if looks_like_tool is None:
+                        stripped = buffer.lstrip()
+                        if stripped:
+                            looks_like_tool = stripped[0] == "{"
+                    if looks_like_tool is False:
+                        emit_token(chunk)
+            except Exception as e:
+                msg = f"Error: LLM generation failed - {e}"
+                emit("error", {"message": str(e)})
+                emit_token(msg)
+                return msg
+
+            tool_call = self._parse_tool_call(buffer) if looks_like_tool else None
+
+            if not tool_call:
+                # Plain text answer. If it was buffered (looked like JSON but
+                # didn't parse), stream it now so nothing is lost.
+                final = buffer.strip()
+                if looks_like_tool:
+                    emit_token(final)
+                agent.thread.add_message("assistant", final)
+                return final
+
+            # --- Tool call path -------------------------------------------
+            call_hash = f"{tool_call['name']}:{json.dumps(tool_call['input'], sort_keys=True)}"
+            if call_hash in self.recent_tool_calls[-2:]:
+                context.append({
+                    "role": "system",
+                    "content": "You are repeating yourself. Change your approach.",
+                })
+                continue
+            self.recent_tool_calls.append(call_hash)
+            if len(self.recent_tool_calls) > 10:
+                self.recent_tool_calls.pop(0)
+
+            hook_result = self.hooks.fire("PreToolUse", {
+                "tool_name": tool_call["name"],
+                "tool_input": tool_call["input"],
+            })
+            if hook_result.get("blocked"):
+                reason = hook_result.get("reason", "blocked")
+                emit("tool", {"name": tool_call["name"], "input": tool_call["input"],
+                              "result": f"BLOCKED: {reason}", "blocked": True})
+                context.append({"role": "tool", "content": f"Tool blocked: {reason}"})
+                continue
+
+            tool_result = self.tools.execute(tool_call["name"], tool_call["input"], agent)
+            emit("tool", {"name": tool_call["name"], "input": tool_call["input"],
+                          "result": tool_result})
+
+            context.append({"role": "assistant", "content": f"[Calling {tool_call['name']}]"})
+            context.append({"role": "tool", "content": tool_result})
+            agent.thread.add_tool_call(tool_call["name"], tool_call["input"], tool_result)
+
+            self.hooks.fire("PostToolUse", {
+                "tool_name": tool_call["name"],
+                "tool_result": tool_result,
+            })
+
+        msg = "I've reached the maximum number of tool calls for this turn."
+        emit_token(msg)
+        return msg
 
     def process_input(self, user_prompt: str) -> str:
         """

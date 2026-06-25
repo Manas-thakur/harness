@@ -13,9 +13,7 @@ if ! command -v ollama &> /dev/null; then
     echo "⚠ Ollama not found. Install from https://ollama.com"
 fi
 
-# Run agent
-python3 -m harness.main \
-    --local \
-    --dashboard \
-    --bundle "$SCRIPT_DIR"
+# Launch the TUI (single interface). Ensure the harness package is importable.
+export PYTHONPATH="${PYTHONPATH:-}:$SCRIPT_DIR"
+python3 -m harness.tui
 

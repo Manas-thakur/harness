@@ -3,10 +3,15 @@ LLM Client for Local Ollama Instance
 Handles communication with local Ollama server and JSON repair for unreliable model outputs.
 """
 
+import os
 import re
 import json
-import ollama
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Iterator
+
+try:
+    import ollama
+except ImportError:  # pragma: no cover - ollama is optional for offline/mock mode
+    ollama = None
 
 
 def repair_and_extract_json(text: str) -> dict:
@@ -99,45 +104,76 @@ class LocalLLMClient:
     """
 
     def __init__(
-        self, 
-        model: str = "qwen2.5:7b",
-        host: str = "http://localhost:11434",
-        timeout: int = 120
+        self,
+        model: str = None,
+        host: str = None,
+        timeout: int = 120,
+        mock: bool = None,
     ):
         """
         Initialize the LLM client.
-        
+
         Args:
-            model: Model name to use (default: qwen2.5:7b)
-            host: Ollama server host URL
+            model: Model name to use (default: env OLLAMA_MODEL or qwen2.5:7b)
+            host: Ollama server host URL (default: env OLLAMA_HOST or localhost)
             timeout: Request timeout in seconds
+            mock: Force offline mock mode. If None, mock is used automatically
+                  whenever Ollama is not reachable.
         """
-        self.model = model
-        self.host = host
+        self.model = model or os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+        self.host = host or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         self.timeout = timeout
 
-        # Configure ollama client
-        ollama._client._host = host
+        # Build a dedicated client bound to this host (avoids mutating globals).
+        self._client = None
+        if ollama is not None:
+            try:
+                self._client = ollama.Client(host=self.host, timeout=timeout)
+            except Exception:
+                self._client = None
+
+        # Decide mock mode. If not explicitly requested, probe the server:
+        # the Ollama client constructor is lazy and won't fail when the
+        # daemon is down, so we actively check reachability here.
+        if mock is not None:
+            self.mock = bool(mock)
+        elif self._client is None:
+            self.mock = True
+        else:
+            self.mock = not self._reachable()
+
+    def _reachable(self) -> bool:
+        """Quick probe to see if the Ollama daemon answers."""
+        if self._client is None:
+            return False
+        try:
+            self._client.list()
+            return True
+        except Exception:
+            return False
 
     def generate(
-        self, 
-        messages: List[Dict[str, str]], 
+        self,
+        messages: List[Dict[str, str]],
         temperature: float = 0.7,
         stream: bool = False
     ) -> str:
         """
         Generate text response from LLM.
-        
+
         Args:
             messages: List of message dicts with 'role' and 'content'
             temperature: Sampling temperature (0.0-1.0)
-            stream: Whether to stream response
-            
+            stream: Whether to stream response internally
+
         Returns:
             Generated text content
         """
+        if self.mock:
+            return self._mock_generate(messages)
+
         try:
-            response = ollama.chat(
+            response = self._client.chat(
                 model=self.model,
                 messages=messages,
                 options={
@@ -150,16 +186,64 @@ class LocalLLMClient:
             if stream:
                 content = ""
                 for chunk in response:
-                    if 'message' in chunk and 'content' in chunk['message']:
-                        content += chunk['message']['content']
+                    content += chunk.get('message', {}).get('content', '')
                 return content
-            else:
-                return response['message']['content']
+            return response['message']['content']
 
-        except ollama.ResponseError as e:
-            raise RuntimeError(f"LLM request failed: {str(e)}")
         except Exception as e:
-            raise RuntimeError(f"Unexpected error during generation: {str(e)}")
+            raise RuntimeError(f"LLM request failed: {str(e)}")
+
+    def generate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+    ) -> Iterator[str]:
+        """
+        Stream a text response token-by-token.
+
+        Yields:
+            Incremental content chunks as they are produced.
+        """
+        if self.mock:
+            yield from self._mock_stream(messages)
+            return
+
+        try:
+            response = self._client.chat(
+                model=self.model,
+                messages=messages,
+                options={"temperature": temperature, "num_predict": 4096},
+                stream=True,
+            )
+            for chunk in response:
+                piece = chunk.get('message', {}).get('content', '')
+                if piece:
+                    yield piece
+        except Exception as e:
+            raise RuntimeError(f"LLM streaming failed: {str(e)}")
+
+    # === Offline mock mode ===============================================
+    # When Ollama is unavailable (no GPU / not installed) the client falls
+    # back to a deterministic responder so the TUI stays fully usable for
+    # demos and development.
+
+    def _mock_generate(self, messages: List[Dict[str, str]]) -> str:
+        return "".join(self._mock_stream(messages))
+
+    def _mock_stream(self, messages: List[Dict[str, str]]) -> Iterator[str]:
+        last_user = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                last_user = msg.get("content", "")
+                break
+        text = (
+            "[offline mock] Ollama isn't reachable, so I'm echoing a stub "
+            "response. Start Ollama and pull a model "
+            f"(`ollama pull {self.model}`) to get real answers.\n\n"
+            f"You said: {last_user.strip()[:280]}"
+        )
+        for word in text.split(" "):
+            yield word + " "
 
     def generate_structured(
         self, 
@@ -195,15 +279,29 @@ class LocalLLMClient:
 
     def is_available(self) -> bool:
         """
-        Check if Ollama server is available and model is loaded.
-        
+        Check if the Ollama server is reachable and the model is loaded.
+
         Returns:
-            True if server is reachable and model exists
+            True if server is reachable and the configured model exists.
         """
+        if self.mock or self._client is None:
+            return False
         try:
-            # Try to list models
-            models = ollama.list()
-            model_names = [m.get('name', '') for m in models.get('models', [])]
-            return any(self.model in name for name in model_names)
+            models = self.list_models()
+            return any(self.model in name for name in models)
         except Exception:
             return False
+
+    def list_models(self) -> List[str]:
+        """Return the names of models available on the Ollama server."""
+        if self._client is None:
+            return []
+        try:
+            data = self._client.list()
+            names = []
+            for m in data.get('models', []):
+                # ollama>=0.4 uses `model`, older uses `name`
+                names.append(m.get('model') or m.get('name') or '')
+            return [n for n in names if n]
+        except Exception:
+            return []

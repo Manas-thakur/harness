@@ -14,8 +14,8 @@ from pathlib import Path
 @dataclass
 class ModelConfig:
     """LLM Model configuration"""
-    model_name: str = "gpt-4o-mini"
-    context_window: int = 128000
+    model_name: str = "qwen2.5:7b"
+    context_window: int = 32768
     max_tokens: int = 4096
     temperature: float = 0.7
     top_p: float = 1.0
