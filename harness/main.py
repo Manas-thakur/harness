@@ -38,20 +38,20 @@ async def run_agent(config: AgentConfig, args):
         shard=args.shard
     )
     memory.initialize()
-    
+
     # Initialize LLM
     llm = None
     if args.local:
         llm = LocalLLMProvider(model_path=args.model)
         await llm.initialize()
-    
+
     # Initialize coordinator
     coordinator = Coordinator(
         config=config,
         memory=memory,
         llm_client=llm
     )
-    
+
     # Run dashboard if enabled
     if args.dashboard:
         dashboard = Dashboard(coordinator=coordinator)
@@ -60,27 +60,27 @@ async def run_agent(config: AgentConfig, args):
         # Simple CLI mode
         print(f"Agent {args.agent_id} started in CLI mode.")
         print("Type 'quit' to exit.")
-        
+
         while True:
             try:
                 user_input = input("\n👤 You: ").strip()
                 if user_input.lower() in ['quit', 'exit', 'q']:
                     break
-                
+
                 response = await coordinator.process_message(user_input)
                 print(f"\n🤖 Agent: {response}")
-                
+
             except KeyboardInterrupt:
                 break
             except EOFError:
                 break
-    
+
     await coordinator.shutdown()
 
 
 def main():
     args = parse_args()
-    
+
     # Load config
     if args.bundle:
         # Load from bundle
@@ -88,16 +88,16 @@ def main():
         if not bundle_path.exists():
             print(f"Error: Bundle not found at {bundle_path}")
             sys.exit(1)
-        
+
         config = load_config(bundle_path / "manifest.json")
         os.chdir(bundle_path)
     else:
         config = load_config()
-    
+
     # Override config with args
     if args.model:
         config.model.name = args.model
-    
+
     # Run async
     try:
         asyncio.run(run_agent(config, args))

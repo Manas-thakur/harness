@@ -7,8 +7,7 @@ import subprocess
 import shutil
 from pathlib import Path
 from datetime import datetime
-from typing import List, Optional
-from harness.file_ops import write_atomic
+from typing import List
 
 
 class VersioningSystem:
@@ -17,7 +16,7 @@ class VersioningSystem:
     Supports creating snapshots, listing versions, and rollback.
     Integrates with Git for long-term audit trail.
     """
-    
+
     def __init__(self, versions_dir: str = "versions", memory_path: str = "memory.md"):
         """
         Initialize versioning system.
@@ -29,10 +28,10 @@ class VersioningSystem:
         self.versions_dir = Path(versions_dir)
         self.memory_path = Path(memory_path)
         self.versions_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Ensure git is initialized
         self._ensure_git_initialized()
-    
+
     def _ensure_git_initialized(self):
         """Initialize git repository if not already done."""
         if not (Path(".git") / "HEAD").exists():
@@ -44,7 +43,7 @@ class VersioningSystem:
                 )
             except subprocess.CalledProcessError:
                 pass  # Git might not be available
-    
+
     def create_snapshot(self, message: str = "Manual snapshot") -> str:
         """
         Creates a timestamped snapshot of the current memory.
@@ -58,23 +57,23 @@ class VersioningSystem:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         snapshot_name = f"v_{timestamp}.md"
         snapshot_path = self.versions_dir / snapshot_name
-        
+
         # Copy current memory if it exists
         if self.memory_path.exists():
             shutil.copy(str(self.memory_path), str(snapshot_path))
         else:
             # Create empty snapshot
             snapshot_path.touch()
-        
+
         # Git commit for long-term audit trail
         self._commit_snapshot(snapshot_name, message)
-        
+
         return str(snapshot_path)
-    
+
     def _commit_snapshot(self, snapshot_name: str, message: str):
         """Commit snapshot to Git."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
         try:
             # Add files
             subprocess.run(
@@ -82,7 +81,7 @@ class VersioningSystem:
                 capture_output=True,
                 check=True
             )
-            
+
             # Commit
             commit_message = f"[Memory] {message} ({timestamp})"
             subprocess.run(
@@ -90,13 +89,13 @@ class VersioningSystem:
                 capture_output=True,
                 check=True
             )
-        except subprocess.CalledProcessError as e:
+        except subprocess.CalledProcessError:
             # Git might not be configured or no changes
             pass
         except FileNotFoundError:
             # Git not installed
             pass
-    
+
     def list_snapshots(self) -> List[Path]:
         """
         Returns a list of available snapshots sorted by date (newest first).
@@ -106,14 +105,14 @@ class VersioningSystem:
         """
         if not self.versions_dir.exists():
             return []
-        
+
         snapshots = sorted(
             self.versions_dir.glob("v_*.md"),
             key=lambda p: p.stat().st_mtime,
             reverse=True
         )
         return snapshots
-    
+
     def rollback(self, snapshot_name: str) -> str:
         """
         Restores memory.md to a previous state.
@@ -126,18 +125,18 @@ class VersioningSystem:
             Path to restored snapshot
         """
         snapshot_path = self.versions_dir / snapshot_name
-        
+
         if not snapshot_path.exists():
             raise FileNotFoundError(f"Snapshot not found: {snapshot_name}")
-        
+
         # Create snapshot of current state before rollback
         self.create_snapshot(f"Rollback to {snapshot_name}")
-        
+
         # Restore the snapshot
         shutil.copy(str(snapshot_path), str(self.memory_path))
-        
+
         return str(snapshot_path)
-    
+
     def get_snapshot_info(self, snapshot_name: str) -> dict:
         """
         Get information about a specific snapshot.
@@ -149,15 +148,15 @@ class VersioningSystem:
             Dict with snapshot metadata
         """
         snapshot_path = self.versions_dir / snapshot_name
-        
+
         if not snapshot_path.exists():
             raise FileNotFoundError(f"Snapshot not found: {snapshot_name}")
-        
+
         stat = snapshot_path.stat()
-        
+
         from harness.token_counter import TokenCounter
         counter = TokenCounter()
-        
+
         return {
             "name": snapshot_name,
             "path": str(snapshot_path),
@@ -165,7 +164,7 @@ class VersioningSystem:
             "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
             "token_count": counter.count_tokens(snapshot_path.read_text())
         }
-    
+
     def diff_snapshots(
         self, 
         snapshot1_name: str, 
@@ -183,12 +182,12 @@ class VersioningSystem:
         """
         snapshot1 = self.versions_dir / snapshot1_name
         snapshot2 = self.versions_dir / snapshot2_name
-        
+
         if not snapshot1.exists():
             raise FileNotFoundError(f"Snapshot not found: {snapshot1_name}")
         if not snapshot2.exists():
             raise FileNotFoundError(f"Snapshot not found: {snapshot2_name}")
-        
+
         try:
             result = subprocess.run(
                 ["diff", "-u", str(snapshot1), str(snapshot2)],
@@ -200,12 +199,12 @@ class VersioningSystem:
             # diff not available, do simple comparison
             content1 = snapshot1.read_text()
             content2 = snapshot2.read_text()
-            
+
             if content1 == content2:
                 return "No differences"
             else:
                 return "Files differ (diff tool not available)"
-    
+
     def cleanup_old_snapshots(
         self, 
         keep_count: int = 10,
@@ -223,17 +222,17 @@ class VersioningSystem:
         """
         removed = []
         snapshots = self.list_snapshots()
-        
+
         cutoff_date = datetime.now().timestamp() - (max_age_days * 24 * 60 * 60)
-        
+
         for i, snapshot in enumerate(snapshots):
             # Always keep the most recent ones up to keep_count
             if i < keep_count:
                 continue
-            
+
             # Remove old snapshots
             if snapshot.stat().st_mtime < cutoff_date:
                 snapshot.unlink()
                 removed.append(snapshot.name)
-        
+
         return removed

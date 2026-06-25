@@ -7,7 +7,6 @@ import os
 import tempfile
 import fcntl
 from pathlib import Path
-from typing import Optional
 from contextlib import contextmanager
 
 
@@ -16,7 +15,7 @@ class FileLock:
     Simple file locking mechanism using fcntl.
     Prevents race conditions when multiple processes access the same file.
     """
-    
+
     def __init__(self, lock_file_path: str):
         """
         Initialize file lock.
@@ -26,7 +25,7 @@ class FileLock:
         """
         self.lock_path = Path(lock_file_path)
         self._fd = None
-    
+
     def acquire(self, exclusive: bool = False, blocking: bool = True):
         """
         Acquire the lock.
@@ -38,29 +37,29 @@ class FileLock:
         # Ensure lock file exists
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         self._fd = open(self.lock_path, 'w')
-        
+
         lock_type = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
         if not blocking:
             lock_type |= fcntl.LOCK_NB
-        
+
         try:
             fcntl.flock(self._fd, lock_type)
         except BlockingIOError:
             self._fd.close()
             self._fd = None
             raise RuntimeError(f"Could not acquire lock on {self.lock_path}")
-    
+
     def release(self):
         """Release the lock."""
         if self._fd:
             fcntl.flock(self._fd, fcntl.LOCK_UN)
             self._fd.close()
             self._fd = None
-    
+
     def __enter__(self):
         self.acquire(exclusive=True)
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.release()
 
@@ -79,7 +78,7 @@ def read_locked(path: str, exclusive: bool = False):
     """
     lock_path = Path(str(path) + ".lock")
     lock = FileLock(str(lock_path))
-    
+
     try:
         lock.acquire(exclusive=exclusive)
         with open(path, 'r') as f:
@@ -100,18 +99,18 @@ def write_atomic(path: str, content: str):
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Create temp file in same directory (for atomic rename)
     fd, tmp_path = tempfile.mkstemp(
         dir=str(path.parent),
         prefix='.tmp_',
         suffix='.md'
     )
-    
+
     try:
         with os.fdopen(fd, 'w') as f:
             f.write(content)
-        
+
         # Atomic rename
         os.replace(tmp_path, str(path))
     except Exception:
@@ -145,7 +144,7 @@ def append_atomic(path: str, content: str):
         content: Content to append
     """
     path = Path(path)
-    
+
     # Use lock to prevent concurrent appends
     lock_path = Path(str(path) + ".lock")
     with FileLock(str(lock_path)):
@@ -153,7 +152,7 @@ def append_atomic(path: str, content: str):
             existing = path.read_text()
         else:
             existing = ""
-        
+
         write_atomic(str(path), existing + content)
 
 
