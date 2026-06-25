@@ -98,6 +98,8 @@ from phi_coding.thinking import (
     next_thinking_level,
     normalize_thinking_level,
 )
+from phi_coding.memory import MemoryStore, default_memory_path
+from phi_coding.memory_tools import create_memory_tools
 from phi_coding.research_tools import create_research_tools
 from phi_coding.tools import create_bash_tool, create_coding_tools
 
@@ -256,10 +258,23 @@ class CodingSession:
         tools = (
             config.tools
             if config.tools is not None
-            else [*create_coding_tools(cwd=config.cwd), *create_research_tools()]
+            else [
+                *create_coding_tools(cwd=config.cwd),
+                *create_research_tools(),
+                *create_memory_tools(cwd=config.cwd),
+            ]
         )
         resource_paths = resource_paths_with_cwd(config.resource_paths, config.cwd)
         resources = _load_session_resources(resource_paths, config.context_files)
+        # Always-loaded profile: inject what we durably remember about the user.
+        core_memory = MemoryStore(default_memory_path(config.cwd)).read_core()
+        append_system_prompt = config.append_system_prompt
+        if core_memory:
+            append_system_prompt = (
+                f"{append_system_prompt}\n\n{core_memory}"
+                if append_system_prompt
+                else core_memory
+            )
         system = (
             config.system
             if config.system is not None
@@ -269,7 +284,7 @@ class CodingSession:
                     tools=tools,
                     skills=resources.skills,
                     custom_prompt=config.custom_system_prompt,
-                    append_system_prompt=config.append_system_prompt,
+                    append_system_prompt=append_system_prompt,
                     context_files=resources.context_files,
                 )
             )

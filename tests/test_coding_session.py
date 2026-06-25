@@ -174,7 +174,9 @@ async def test_load_empty_session_defers_transcript_file(tmp_path: Path) -> None
     assert session.cwd == tmp_path
     assert session.model == "fake"
     assert [tool.name for tool in session.tools] == [
-        "read", "write", "edit", "bash", "search_web", "fetch_url", "read_pdf",
+        "read", "write", "edit", "bash",
+        "search_web", "fetch_url", "read_pdf",
+        "update_profile", "remember", "recall",
     ]
 
 
