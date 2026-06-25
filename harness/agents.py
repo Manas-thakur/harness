@@ -16,18 +16,27 @@ class ResearchAgent(BaseAgent):
         super().__init__(
             name="researcher",
             allowed_tools=[
-                "search_web", 
-                "read_file", 
-                "read_pdf", 
+                "search_web",
+                "read_file",
+                "read_pdf",
                 "summarize",
-                "read_memory"
+                "read_memory",
+                "remember",
+                "recall",
+                "update_profile",
             ],
             system_prompt="""You are a research specialist.
-- Your ONLY job is to find information using search_web and read documents.
+- Your job is to find accurate information using your tools and report it clearly.
+- TOOLS: call `search_web` for anything current or factual you are not sure of —
+  never guess or invent facts. Use `read_file` and `read_pdf` to read documents.
+  Use `recall` to check what you already know before searching, and `remember`
+  to store useful findings. Call `update_profile` when the user tells you durable
+  things about themselves or their project.
 - Do NOT write code or edit files.
-- Cite your sources clearly.
-- If you cannot find the answer, state that explicitly.
-- Use the read_memory tool to check what you already know before searching."""
+- Cite your sources. NEVER fabricate tool output or pretend a search ran.
+- If you cannot find or verify the answer, say so explicitly.
+- If your runtime lacks function calling, request a tool by replying with ONLY a
+  JSON object: {"tool": "search_web", "input": {"query": "..."}}"""
         )
 
     def run(self, task: str, coordinator) -> str:
@@ -47,17 +56,23 @@ class TutorAgent(BaseAgent):
         super().__init__(
             name="tutor",
             allowed_tools=[
-                "explain", 
-                "quiz_me", 
-                "create_analogy", 
-                "read_memory"
+                "explain",
+                "quiz_me",
+                "create_analogy",
+                "read_memory",
+                "recall",
+                "remember",
+                "update_profile",
             ],
             system_prompt="""You are a study companion.
 - Your job is to explain concepts simply and adapt to the user's level.
-- Use analogies frequently.
-- Check for understanding by asking follow-up questions.
-- Do NOT search the web or write code.
-- Use read_memory to recall user preferences and learning style."""
+- Use analogies frequently and check understanding with follow-up questions.
+- TOOLS: use `recall` to remember the user's preferences and learning style, and
+  `update_profile` when they tell you how they like to learn. Do NOT search the web
+  or write code.
+- NEVER fabricate tool output. If you don't know something, say so plainly.
+- If your runtime lacks function calling, request a tool by replying with ONLY a
+  JSON object: {"tool": "recall", "input": {"query": "..."}}"""
         )
 
     def run(self, task: str, coordinator) -> str:
@@ -77,20 +92,26 @@ class CoderAgent(BaseAgent):
         super().__init__(
             name="coder",
             allowed_tools=[
-                "bash", 
-                "read_file", 
-                "write_file", 
-                "edit_file", 
-                "git_clone", 
+                "bash",
+                "read_file",
+                "write_file",
+                "edit_file",
+                "git_clone",
                 "git_commit",
-                "read_memory"
+                "read_memory",
+                "recall",
+                "remember",
+                "update_profile",
             ],
             system_prompt="""You are a software engineer.
-- You write, read, and edit code.
-- Always read a file before editing it.
-- Use bash for git operations and running tests.
-- Do NOT search the web or explain concepts like a tutor.
-- Be careful with file operations - always verify paths."""
+- You write, read, and edit code using your tools.
+- TOOLS: always `read_file` before you `edit_file`. Use `bash` for git operations
+  and running tests. Use `recall`/`remember` to track project details, and
+  `update_profile` when the user tells you about their project or stack.
+- Do NOT explain concepts like a tutor.
+- Be careful with file operations — always verify paths. NEVER fabricate tool output.
+- If your runtime lacks function calling, request a tool by replying with ONLY a
+  JSON object: {"tool": "read_file", "input": {"path": "..."}}"""
         )
 
     def run(self, task: str, coordinator) -> str:

@@ -3,11 +3,12 @@
 typer>=0.9.0
 rich>=13.0.0
 
-# LLM Client (Local Ollama)
-ollama>=0.1.0
+# LLM Client (Local Ollama) — >=0.3 for native tool/function calling
+ollama>=0.3.0
 
 # Web Search (Free, No API Key)
-duckduckgo-search>=4.0.0
+# Package was renamed duckduckgo-search -> ddgs; code prefers ddgs, falls back.
+ddgs>=6.0.0
 
 # PDF Reading
 pypdf>=3.0.0

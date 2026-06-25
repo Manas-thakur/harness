@@ -63,7 +63,8 @@ def ask(
 
 @app.command("dream")
 def dream(
-    sessions: int = typer.Option(3, "--sessions", "-s", help="Number of recent sessions to process")
+    sessions: int = typer.Option(3, "--sessions", "-s", help="Number of recent sessions to process"),
+    activate: bool = typer.Option(False, "--activate", help="Apply the dream to memory.md after consolidating (snapshots first)")
 ):
     """Run batch memory consolidation (dreaming)."""
     console.print("[bold purple]🌙 Starting Dreaming Cycle...[/bold purple]")
@@ -77,7 +78,13 @@ def dream(
         if result:
             console.print("[green]✨ Dreaming complete![/green]")
             console.print(f"Output saved to: {result}")
-            console.print("\n[yellow]Run 'agent activate <path>' to apply the new memory.[/yellow]")
+            if activate:
+                if engine.activate_dream(result):
+                    console.print("[green]✓ Memory activated (snapshot saved first).[/green]")
+                else:
+                    console.print("[red]✗ Failed to activate the dream.[/red]")
+            else:
+                console.print("\n[yellow]Run 'agent activate <path>' (or pass --activate) to apply.[/yellow]")
         else:
             console.print("[yellow]No sessions found to consolidate.[/yellow]")
 

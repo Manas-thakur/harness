@@ -42,7 +42,12 @@ class Coordinator:
         self.hooks = HookDispatcher()
         self.token_counter = TokenCounter()
         self.memory = MemoryStore()
-        self.tools = ToolRegistry()
+        # Share the same MemoryStore with the tools so memory reads/writes
+        # (remember/recall/update_profile) and the injected core block agree.
+        self.tools = ToolRegistry(memory=self.memory)
+
+        # Load the always-loaded soul/identity layer once.
+        self.soul = self._load_soul()
 
         # Initialize Specialist Agents (Scoped)
         self.agents = {
@@ -120,85 +125,149 @@ class Coordinator:
         self._save_transcript_entry("assistant", response)
         return response
 
+    def _load_soul(self, path: str = "soul.md") -> str:
+        """Read the always-loaded soul/identity document, if present."""
+        try:
+            from pathlib import Path
+            p = Path(path)
+            if p.exists():
+                return p.read_text().strip()
+        except Exception:
+            pass
+        return ""
+
+    def _build_context(self, agent, user_prompt: str) -> List[Dict]:
+        """
+        Assemble the LLM context for a turn and record the user message.
+
+        Layers (front to back): soul · role system prompt · core profile
+        block · thread history · this user message. The soul and core block are
+        injected into the returned copy only, so they never accumulate in the
+        agent's persisted thread.
+        """
+        context = agent.get_active_context()
+        self._inject_layers(context)
+        context.append({"role": "user", "content": user_prompt})
+        agent.thread.add_message("user", user_prompt)
+        return context
+
+    def _inject_layers(self, context: List[Dict]):
+        """Prepend the soul and core-memory system messages to ``context``."""
+        if self.soul:
+            context.insert(0, {"role": "system", "content": self.soul})
+
+        try:
+            core = self.memory.read_core()
+        except Exception:
+            core = ""
+        if core:
+            # Insert after any leading system messages (soul + role prompt).
+            pos = 0
+            while pos < len(context) and context[pos].get("role") == "system":
+                pos += 1
+            context.insert(pos, {
+                "role": "system",
+                "content": "# Core memory (about the user)\n" + core,
+            })
+
+    def _extract_tool_calls(self, msg: Dict) -> List[Dict]:
+        """
+        Get tool calls from a chat_with_tools result.
+
+        Prefers native ``tool_calls``; falls back to parsing a JSON tool call
+        from plain content (for models/servers without function calling).
+        Returns a list of ``{"name", "arguments"}`` dicts.
+        """
+        tool_calls = list(msg.get("tool_calls") or [])
+        if not tool_calls and msg.get("content"):
+            parsed = self._parse_tool_call(msg["content"])
+            if parsed:
+                tool_calls = [{"name": parsed["name"], "arguments": parsed["input"]}]
+        return tool_calls
+
+    def _dispatch_tool(self, agent, name: str, arguments: Dict, context: List[Dict], emit):
+        """
+        Execute one tool call with the two-strike guard and hooks.
+
+        Appends the tool result (or block reason) to ``context`` and the agent
+        thread. Returns the result string, or None when the call was repeated
+        or blocked.
+        """
+        arguments = arguments or {}
+        call_hash = f"{name}:{json.dumps(arguments, sort_keys=True)}"
+        if call_hash in self.recent_tool_calls[-2:]:
+            context.append({
+                "role": "system",
+                "content": "You are repeating yourself. Change your approach.",
+            })
+            return None
+        self.recent_tool_calls.append(call_hash)
+        if len(self.recent_tool_calls) > 10:
+            self.recent_tool_calls.pop(0)
+
+        hook_result = self.hooks.fire("PreToolUse", {
+            "tool_name": name, "tool_input": arguments,
+        })
+        if hook_result.get("blocked"):
+            reason = hook_result.get("reason", "blocked")
+            emit("tool", {"name": name, "input": arguments,
+                          "result": f"BLOCKED: {reason}", "blocked": True})
+            context.append({"role": "tool", "content": f"Tool blocked: {reason}"})
+            return None
+
+        tool_result = self.tools.execute(name, arguments, agent)
+        emit("tool", {"name": name, "input": arguments, "result": tool_result})
+        context.append({"role": "assistant", "content": f"[Calling {name}]"})
+        context.append({"role": "tool", "content": tool_result})
+        agent.thread.add_tool_call(name, arguments, tool_result)
+        self.hooks.fire("PostToolUse", {
+            "tool_name": name, "tool_result": tool_result,
+        })
+        return tool_result
+
+    @staticmethod
+    def _chunk_text(text: str):
+        """Yield a complete string word-by-word to mimic live streaming."""
+        if not text:
+            return
+        words = text.split(" ")
+        for i, word in enumerate(words):
+            yield word if i == len(words) - 1 else word + " "
+
     def _execute_agent_loop_streaming(self, agent, user_prompt, emit, on_token) -> str:
         """
-        Agent loop with token streaming for the final answer.
+        Agent loop using native tool calling, streaming the final answer.
 
-        Tool calls (JSON beginning with ``{``) are buffered silently and
-        executed; plain-text answers are streamed to ``on_token`` as they
-        arrive so the TUI can render them live.
+        Each turn is a non-streaming decision via ``chat_with_tools``. When the
+        model requests tools they are executed and the loop continues; when it
+        returns a plain answer that text is chunked to ``on_token`` so the TUI
+        renders it live.
         """
         emit_token = on_token or (lambda chunk: None)
 
-        context = agent.get_active_context()
-        context.append({"role": "user", "content": user_prompt})
-        agent.thread.add_message("user", user_prompt)
+        context = self._build_context(agent, user_prompt)
+        schemas = self.tools.get_schemas(agent.allowed_tools)
 
         max_agent_turns = 10
         for _ in range(max_agent_turns):
-            buffer = ""
-            looks_like_tool = None
             try:
-                for chunk in self.llm.generate_stream(context, temperature=0.7):
-                    buffer += chunk
-                    if looks_like_tool is None:
-                        stripped = buffer.lstrip()
-                        if stripped:
-                            looks_like_tool = stripped[0] == "{"
-                    if looks_like_tool is False:
-                        emit_token(chunk)
+                msg = self.llm.chat_with_tools(context, tools=schemas, temperature=0.7)
             except Exception as e:
-                msg = f"Error: LLM generation failed - {e}"
+                m = f"Error: LLM generation failed - {e}"
                 emit("error", {"message": str(e)})
-                emit_token(msg)
-                return msg
+                emit_token(m)
+                return m
 
-            tool_call = self._parse_tool_call(buffer) if looks_like_tool else None
-
-            if not tool_call:
-                # Plain text answer. If it was buffered (looked like JSON but
-                # didn't parse), stream it now so nothing is lost.
-                final = buffer.strip()
-                if looks_like_tool:
-                    emit_token(final)
+            tool_calls = self._extract_tool_calls(msg)
+            if not tool_calls:
+                final = (msg.get("content") or "").strip()
+                for piece in self._chunk_text(final):
+                    emit_token(piece)
                 agent.thread.add_message("assistant", final)
                 return final
 
-            # --- Tool call path -------------------------------------------
-            call_hash = f"{tool_call['name']}:{json.dumps(tool_call['input'], sort_keys=True)}"
-            if call_hash in self.recent_tool_calls[-2:]:
-                context.append({
-                    "role": "system",
-                    "content": "You are repeating yourself. Change your approach.",
-                })
-                continue
-            self.recent_tool_calls.append(call_hash)
-            if len(self.recent_tool_calls) > 10:
-                self.recent_tool_calls.pop(0)
-
-            hook_result = self.hooks.fire("PreToolUse", {
-                "tool_name": tool_call["name"],
-                "tool_input": tool_call["input"],
-            })
-            if hook_result.get("blocked"):
-                reason = hook_result.get("reason", "blocked")
-                emit("tool", {"name": tool_call["name"], "input": tool_call["input"],
-                              "result": f"BLOCKED: {reason}", "blocked": True})
-                context.append({"role": "tool", "content": f"Tool blocked: {reason}"})
-                continue
-
-            tool_result = self.tools.execute(tool_call["name"], tool_call["input"], agent)
-            emit("tool", {"name": tool_call["name"], "input": tool_call["input"],
-                          "result": tool_result})
-
-            context.append({"role": "assistant", "content": f"[Calling {tool_call['name']}]"})
-            context.append({"role": "tool", "content": tool_result})
-            agent.thread.add_tool_call(tool_call["name"], tool_call["input"], tool_result)
-
-            self.hooks.fire("PostToolUse", {
-                "tool_name": tool_call["name"],
-                "tool_result": tool_result,
-            })
+            for tc in tool_calls:
+                self._dispatch_tool(agent, tc["name"], tc.get("arguments", {}), context, emit)
 
         msg = "I've reached the maximum number of tool calls for this turn."
         emit_token(msg)
@@ -290,93 +359,37 @@ Return ONLY JSON: {{"agent": "category_name", "reasoning": "brief reason"}}
 
     def _execute_agent_loop(self, agent, user_prompt: str) -> str:
         """
-        Execute the agent's tool loop for a task.
-        
+        Execute the agent's tool loop for a task (non-streaming).
+
+        Mirrors the streaming loop using native tool calling, for callers like
+        ``agent ask`` that don't stream tokens.
+
         Args:
             agent: Target agent instance
             user_prompt: User's task
-            
+
         Returns:
             Final response
         """
-        context = agent.get_active_context()
-        context.append({"role": "user", "content": user_prompt})
+        noop = lambda *a, **k: None
+        context = self._build_context(agent, user_prompt)
+        schemas = self.tools.get_schemas(agent.allowed_tools)
 
         max_agent_turns = 10  # Limit per-agent turns
-        agent_turn = 0
-
-        while agent_turn < max_agent_turns:
-            # Get LLM response
+        for _ in range(max_agent_turns):
             try:
-                response = self.llm.generate(context, temperature=0.7)
+                msg = self.llm.chat_with_tools(context, tools=schemas, temperature=0.7)
             except Exception as e:
                 return f"Error: LLM generation failed - {str(e)}"
 
-            # Check if response contains tool call
-            tool_call = self._parse_tool_call(response)
+            tool_calls = self._extract_tool_calls(msg)
+            if not tool_calls:
+                final = (msg.get("content") or "").strip()
+                agent.thread.add_message("assistant", final)
+                return final
 
-            if tool_call:
-                # Two-Strike Rule check
-                call_hash = f"{tool_call['name']}:{json.dumps(tool_call['input'], sort_keys=True)}"
-                if call_hash in self.recent_tool_calls[-2:]:
-                    context.append({
-                        "role": "system",
-                        "content": "You are repeating yourself. Change your approach."
-                    })
-                    agent_turn += 1
-                    continue
-
-                self.recent_tool_calls.append(call_hash)
-                if len(self.recent_tool_calls) > 10:
-                    self.recent_tool_calls.pop(0)
-
-                # Fire PreToolUse hook
-                hook_result = self.hooks.fire(
-                    "PreToolUse",
-                    {
-                        "tool_name": tool_call['name'],
-                        "tool_input": tool_call['input']
-                    }
-                )
-
-                if hook_result.get("blocked"):
-                    context.append({
-                        "role": "tool",
-                        "content": f"Tool blocked: {hook_result.get('reason')}"
-                    })
-                    agent_turn += 1
-                    continue
-
-                # Execute tool
-                tool_result = self.tools.execute(
-                    tool_call['name'],
-                    tool_call['input'],
-                    agent
-                )
-
-                # Add to context
-                context.append({
-                    "role": "assistant",
-                    "content": f"[Calling {tool_call['name']}]"
-                })
-                context.append({
-                    "role": "tool",
-                    "content": tool_result
-                })
-
-                # Fire PostToolUse hook
-                self.hooks.fire(
-                    "PostToolUse",
-                    {
-                        "tool_name": tool_call['name'],
-                        "tool_result": tool_result
-                    }
-                )
-
-                agent_turn += 1
-            else:
-                # No tool call, return final response
-                return response.strip()
+            for tc in tool_calls:
+                self._dispatch_tool(agent, tc["name"], tc.get("arguments", {}), context, noop)
 
         # Reached max turns without final response
         return "I've reached the maximum number of tool calls. Here's what I found so far."

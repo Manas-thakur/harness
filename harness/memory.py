@@ -19,14 +19,20 @@ class MemoryStore:
 
     DEFAULT_MEMORY_TEMPLATE = """# Agent Memory
 
+## About
+[Who the user is]
+
+## Current Work
+[What the user is currently working on]
+
+## User Preferences
+[How the user likes things explained, formatting rules]
+
 ## Active Topics
 [Currently researching or working on]
 
 ## Verified Facts
 [Key information learned from sessions]
-
-## User Preferences
-[How the user likes things explained, formatting rules]
 
 ## Patterns & Insights
 [Cross-session observations]
@@ -34,6 +40,10 @@ class MemoryStore:
 ## Action Items
 [Next steps or pending tasks]
 """
+
+    # Sections that form the always-loaded "core" profile block injected into
+    # every session so general/profile info persists across restarts.
+    CORE_SECTIONS = ("About", "Current Work", "User Preferences")
 
     def __init__(self, memory_path: str = "memory.md", use_mesh: bool = False, 
                  memory_dir: str = "./memory", config=None):
@@ -58,13 +68,56 @@ class MemoryStore:
             self.mesh_store = InBandMemoryStore(str(self.memory_dir))
             self.mesh_store.initialize()
         else:
-            # Legacy mode - ensure memory file exists
+            # Legacy mode - ensure memory file exists with core sections
             if not self.memory_path.exists():
                 self._initialize_empty_memory()
+            else:
+                self._ensure_core_sections()
 
     def _initialize_empty_memory(self):
         """Creates the initial structured memory file."""
         write_atomic(str(self.memory_path), self.DEFAULT_MEMORY_TEMPLATE)
+
+    def _ensure_core_sections(self):
+        """
+        Seed the always-loaded core sections into a stub/empty memory file.
+
+        Only acts on the migration stub ("Legacy Memory Archived") or a file
+        with no sections at all, so existing user memory files are left exactly
+        as written. Writing via ``append_to_section`` creates any other missing
+        section on demand, and ``read_core`` simply skips sections that are
+        absent.
+        """
+        try:
+            content = self.read_active()
+        except Exception:
+            return
+        is_stub = "Legacy Memory Archived" in content or "## " not in content
+        if not is_stub:
+            return
+        for section in self.CORE_SECTIONS:
+            if f"## {section}" not in content:
+                # update_section appends the section if absent.
+                self.update_section(section, f"[{section}]")
+                content = self.read_active()
+
+    def read_core(self) -> str:
+        """
+        Build the compact always-loaded profile block from core sections.
+
+        Returns:
+            A small markdown block with the About / Current Work /
+            User Preferences sections, or an empty string if they hold only
+            placeholder text.
+        """
+        parts = []
+        for section in self.CORE_SECTIONS:
+            body = self.get_section(section).strip()
+            # Skip empty or placeholder-only sections (e.g. "[About]").
+            if not body or (body.startswith("[") and body.endswith("]") and "\n" not in body):
+                continue
+            parts.append(f"## {section}\n{body}")
+        return "\n\n".join(parts)
 
     def read_active(self) -> str:
         """
@@ -190,6 +243,34 @@ class MemoryStore:
         else:
             new_entry = f"\n### [{timestamp}] {section}\n{content}\n"
             append_atomic(str(self.memory_path), new_entry)
+
+    def append_to_section(self, section_name: str, content: str):
+        """
+        Append a line *inside* a named section (not at end of file).
+
+        Unlike ``append_in_band`` (which appends a timestamped block to the end
+        of the file), this keeps the content within the section so
+        ``get_section`` / ``read_core`` can read it back. Placeholder bodies
+        like ``[Who the user is]`` are replaced rather than appended to.
+
+        Args:
+            section_name: Section to append into.
+            content: Line of content to add.
+        """
+        if self.use_mesh and self.mesh_store:
+            # Mesh mode has no in-file sections; fall back to a node append.
+            self.append_in_band(section_name, content)
+            return
+
+        existing = self.get_section(section_name).strip()
+        # Drop a single-line placeholder like "[Who the user is]".
+        if existing.startswith('[') and existing.endswith(']') and '\n' not in existing:
+            existing = ''
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        line = f"- ({timestamp}) {content}"
+        new_content = f"{existing}\n{line}".strip() if existing else line
+        self.update_section(section_name, new_content)
 
     def update_section(self, section_name: str, new_content: str):
         """

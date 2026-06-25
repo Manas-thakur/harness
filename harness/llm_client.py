@@ -193,6 +193,93 @@ class LocalLLMClient:
         except Exception as e:
             raise RuntimeError(f"LLM request failed: {str(e)}")
 
+    def chat_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]] = None,
+        temperature: float = 0.7,
+    ) -> Dict[str, Any]:
+        """
+        Single non-streaming decision turn with native function-calling.
+
+        Passes ``tools`` (a list of JSON-schema function definitions) to the
+        Ollama ``chat`` endpoint and returns a normalized message so callers
+        don't depend on the raw client object shape.
+
+        Args:
+            messages: Conversation context (role/content dicts, plus optional
+                ``tool`` role results).
+            tools: Tool/function schemas, or None to disable tool calling.
+            temperature: Sampling temperature.
+
+        Returns:
+            ``{"content": str, "tool_calls": [{"name": str, "arguments": dict}, ...]}``
+            ``tool_calls`` is an empty list when the model returns a plain answer
+            or when running in offline mock mode.
+        """
+        if self.mock:
+            # Mock mode never calls tools so offline tests stay deterministic.
+            return {"content": self._mock_generate(messages), "tool_calls": []}
+
+        try:
+            response = self._client.chat(
+                model=self.model,
+                messages=messages,
+                tools=tools or None,
+                options={"temperature": temperature, "num_predict": 4096},
+                stream=False,
+            )
+        except Exception as e:
+            raise RuntimeError(f"LLM tool-call request failed: {str(e)}")
+
+        message = response.get("message", {}) if isinstance(response, dict) else {}
+        # ollama returns Message objects in newer clients; support both.
+        if not message and hasattr(response, "message"):
+            message = response.message
+
+        content = ""
+        raw_calls = None
+        if isinstance(message, dict):
+            content = message.get("content", "") or ""
+            raw_calls = message.get("tool_calls")
+        else:
+            content = getattr(message, "content", "") or ""
+            raw_calls = getattr(message, "tool_calls", None)
+
+        return {"content": content, "tool_calls": self._normalize_tool_calls(raw_calls)}
+
+    @staticmethod
+    def _normalize_tool_calls(raw_calls) -> List[Dict[str, Any]]:
+        """Normalize Ollama tool-call entries to ``{name, arguments}`` dicts."""
+        normalized: List[Dict[str, Any]] = []
+        for call in raw_calls or []:
+            # Each call may be a dict or an object with a ``.function`` attr.
+            func = None
+            if isinstance(call, dict):
+                func = call.get("function", call)
+            else:
+                func = getattr(call, "function", call)
+
+            if isinstance(func, dict):
+                name = func.get("name")
+                args = func.get("arguments", {})
+            else:
+                name = getattr(func, "name", None)
+                args = getattr(func, "arguments", {})
+
+            # Arguments may arrive as a JSON string from some servers.
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except (json.JSONDecodeError, ValueError):
+                    args = {}
+            if not isinstance(args, dict):
+                args = {}
+
+            if name:
+                normalized.append({"name": name, "arguments": args})
+        return normalized
+
     def generate_stream(
         self,
         messages: List[Dict[str, str]],
