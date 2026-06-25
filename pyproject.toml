@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "phi"
 version = "0.1.0"
-description = "A Python implementation of a minimalist Pi-style coding-agent harness."
+description = "menace — a local research, study, and coding agent on a Pi-style harness."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -22,6 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
+menace = "phi_coding.cli:app"
 phi = "phi_coding.cli:app"
 
 [dependency-groups]
