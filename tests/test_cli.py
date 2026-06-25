@@ -24,6 +24,7 @@ from phi_coding.provider_config import (
 from phi_coding.rendering import PrintOutputMode
 from phi_coding.resources import PhiResourcePaths
 from phi_coding.system_prompt import BuildSystemPromptOptions, build_system_prompt
+from phi_coding.research_tools import create_research_tools
 from phi_coding.tools import create_coding_tools
 
 
@@ -133,9 +134,14 @@ async def test_run_print_mode_prints_final_assistant_text(
     assert captured.err == ""
     assert provider.calls[0][0] == "fake"
     assert provider.calls[0][1] == build_system_prompt(
-        BuildSystemPromptOptions(cwd=tmp_path, tools=create_coding_tools(cwd=tmp_path))
+        BuildSystemPromptOptions(
+            cwd=tmp_path,
+            tools=[*create_coding_tools(cwd=tmp_path), *create_research_tools()],
+        )
     )
-    assert [tool.name for tool in provider.calls[0][3]] == ["read", "write", "edit", "bash"]
+    assert [tool.name for tool in provider.calls[0][3]] == [
+        "read", "write", "edit", "bash", "search_web", "fetch_url", "read_pdf",
+    ]
 
 
 @pytest.mark.anyio

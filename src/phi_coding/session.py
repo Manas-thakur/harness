@@ -98,6 +98,7 @@ from phi_coding.thinking import (
     next_thinking_level,
     normalize_thinking_level,
 )
+from phi_coding.research_tools import create_research_tools
 from phi_coding.tools import create_bash_tool, create_coding_tools
 
 StreamingBehavior = Literal["steer", "follow_up"]
@@ -252,7 +253,11 @@ class CodingSession:
             if linear_state.active_leaf_id is not None
             else linear_state
         )
-        tools = config.tools if config.tools is not None else create_coding_tools(cwd=config.cwd)
+        tools = (
+            config.tools
+            if config.tools is not None
+            else [*create_coding_tools(cwd=config.cwd), *create_research_tools()]
+        )
         resource_paths = resource_paths_with_cwd(config.resource_paths, config.cwd)
         resources = _load_session_resources(resource_paths, config.context_files)
         system = (

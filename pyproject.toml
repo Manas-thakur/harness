@@ -15,6 +15,10 @@ dependencies = [
     "rich>=13.0",
     "textual>=1.0",
     "typer>=0.12",
+    # Web research tools (search_web / fetch_url / read_pdf)
+    "ddgs>=6.0",
+    "lxml>=4.9",
+    "pypdf>=3.0",
 ]
 
 [project.scripts]
