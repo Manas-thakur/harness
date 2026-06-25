@@ -123,6 +123,40 @@ git commit -m "Initial commit"
 
 ## 🚀 Usage
 
+### The TUI (main interface)
+
+The agent is driven entirely through a single **opencode-style terminal UI**.
+Launch it with no arguments:
+
+```bash
+python agent.py          # or: python -m harness.tui
+```
+
+You get a streaming chat interface that routes each message to the right
+specialist agent (researcher / tutor / coder / dreamer), shows tool calls
+inline, and keeps a live status line. Inside the TUI, slash commands manage
+everything:
+
+| Command | Action |
+| :-- | :-- |
+| `/help` | List all commands |
+| `/memory` | View long-term memory |
+| `/agents` | Show specialist agents and their scoped tools |
+| `/tools` | List available tools |
+| `/status` | System status (model, backend, turns) |
+| `/model [name]` | Show or switch the active Ollama model |
+| `/dream [n]` | Consolidate the last *n* sessions into memory |
+| `/clear` | Reset the conversation |
+| `/quit` | Exit |
+
+> **No Ollama? No problem.** If the Ollama daemon isn't reachable the TUI runs
+> in **offline mock mode** so the interface stays fully usable. Start Ollama and
+> `ollama pull qwen2.5:7b` for real answers.
+
+### Scripted commands
+
+The same engine is available non-interactively for scripting/automation:
+
 ### Basic Commands
 
 ```bash
@@ -208,11 +242,13 @@ local-ai-agent/
 │   ├── memory.py                 # In-band memory operations
 │   ├── dreaming.py               # Out-of-band batch consolidation
 │   ├── versioning.py             # Git-based audit trail
-│   ├── coordinator.py            # Intent routing & orchestration
+│   ├── coordinator.py            # Intent routing, streaming & orchestration
 │   ├── agents.py                 # Specialist agent definitions
+│   ├── agent_base.py             # Shared agent contract
 │   ├── threads.py                # Isolated context windows
-│   ├── skills_loader.py          # Progressive disclosure engine
-│   └── tools.py                  # Free tool implementations
+│   ├── inband_memory.py          # Neural Markdown Mesh store
+│   ├── tools.py                  # Free tool implementations
+│   └── tui.py                    # The TUI (single user interface)
 │
 ├── skills/                       # Agent capabilities
 │   ├── research-web/

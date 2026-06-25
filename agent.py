@@ -9,8 +9,29 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-app = typer.Typer(help="Local AI Research & Study Agent")
+app = typer.Typer(
+    help="Local AI Research & Study Agent — run with no command to open the TUI.",
+    no_args_is_help=False,
+)
 console = Console()
+
+
+@app.callback(invoke_without_command=True)
+def _default(ctx: typer.Context):
+    """Launch the interactive TUI when no subcommand is given."""
+    if ctx.invoked_subcommand is None:
+        from harness.tui import run_tui
+        run_tui()
+
+
+@app.command("chat")
+def chat(
+    model: str = typer.Option(None, "--model", "-m", help="Ollama model to use"),
+    mock: bool = typer.Option(False, "--mock", help="Force offline mock mode"),
+):
+    """Open the interactive TUI (the main interface)."""
+    from harness.tui import run_tui
+    run_tui(model=model, mock=mock or None)
 
 
 @app.command("ask")

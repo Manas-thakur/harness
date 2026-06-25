@@ -15,8 +15,8 @@ class TestModelConfig:
     def test_default_values(self):
         """Test default configuration values"""
         config = ModelConfig()
-        assert config.model_name == "gpt-4o-mini"
-        assert config.context_window == 128000
+        assert config.model_name == "qwen2.5:7b"
+        assert config.context_window == 32768
         assert config.max_tokens == 4096
         assert config.temperature == 0.7
         assert config.timeout == 30
@@ -200,7 +200,7 @@ class TestConfig:
         config = Config.from_env()
         # Note: from_env may not fully implement env var loading
         # This test verifies the current behavior
-        assert config.model.model_name in ["env-model", "gpt-4o-mini"]
+        assert config.model.model_name in ["env-model", "qwen2.5:7b"]
 
     def test_from_env_memory_dir(self, monkeypatch):
         """Test loading memory dir from environment variable"""
@@ -224,4 +224,4 @@ class TestConfig:
         
         config = Config.from_env()
         # Should use defaults
-        assert config.model.model_name == "gpt-4o-mini"
+        assert config.model.model_name == "qwen2.5:7b"

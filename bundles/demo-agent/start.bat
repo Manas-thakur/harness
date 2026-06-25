@@ -9,10 +9,8 @@ if %errorlevel% neq 0 (
     echo ⚠ Ollama not found. Install from https://ollama.com
 )
 
-REM Run agent
-python -m harness.main ^
-    --local ^
-    --dashboard ^
-    --bundle "%~dp0"
+REM Launch the TUI (single interface)
+set PYTHONPATH=%PYTHONPATH%;%~dp0
+python -m harness.tui
 
 pause
