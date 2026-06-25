@@ -45,6 +45,7 @@ def test_load_provider_settings_missing_file_uses_ollama_default(
         "anthropic",
         "openrouter",
         "huggingface",
+        "ollama-cloud",
     ]
     assert settings.providers[0].default_model == "qwen2.5:7b"
     assert settings.providers[0].models == ("qwen2.5:7b",)
@@ -249,6 +250,7 @@ def test_upsert_openai_compatible_provider_replaces_and_sets_default() -> None:
         "huggingface",
         "local",
         "ollama",
+        "ollama-cloud",
         "openai",
         "openai-codex",
         "openrouter",
@@ -900,6 +902,32 @@ def test_ollama_provider_uses_env_api_key_when_set(monkeypatch: pytest.MonkeyPat
     ollama = settings.get_provider("ollama")
     config = openai_compatible_config_from_provider(ollama)
     assert config.api_key == "secret"
+
+
+def test_ollama_cloud_provider_requires_api_key() -> None:
+    settings = ProviderSettings()
+    cloud = settings.get_provider("ollama-cloud")
+    assert isinstance(cloud, OpenAICompatibleProviderConfig)
+    assert cloud.requires_api_key is True
+    assert cloud.base_url == "https://ollama.com/v1"
+    assert cloud.credential_name == "ollama-cloud"
+
+
+def test_ollama_cloud_uses_env_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OLLAMA_API_KEY", "cloud-secret")
+    settings = ProviderSettings()
+    cloud = settings.get_provider("ollama-cloud")
+    config = openai_compatible_config_from_provider(cloud)
+    assert config.api_key == "cloud-secret"
+    assert config.base_url == "https://ollama.com/v1"
+
+
+def test_ollama_cloud_missing_key_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OLLAMA_API_KEY", raising=False)
+    settings = ProviderSettings()
+    cloud = settings.get_provider("ollama-cloud")
+    with pytest.raises(RuntimeError, match="Missing provider API key"):
+        openai_compatible_config_from_provider(cloud)
 
 
 def test_ollama_tags_url_strips_v1_suffix() -> None:
