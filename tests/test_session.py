@@ -1,0 +1,246 @@
+from pathlib import Path
+
+import pytest
+
+from phi_agent import AssistantMessage, ToolResultMessage, UserMessage
+from phi_agent.session import (
+    BranchSummaryEntry,
+    CompactionEntry,
+    CustomEntry,
+    JsonlSessionStorage,
+    LabelEntry,
+    LeafEntry,
+    MessageEntry,
+    ModelChangeEntry,
+    SessionJsonlError,
+    SessionState,
+    SessionTreeError,
+    entry_from_json_line,
+    entry_to_json_line,
+    path_to_entry,
+)
+
+
+def test_session_entry_round_trips_jsonl() -> None:
+    entry = MessageEntry(id="entry-1", message=UserMessage(content="Hello"))
+
+    line = entry_to_json_line(entry)
+    parsed = entry_from_json_line(line)
+
+    assert parsed == entry
+
+
+def test_tool_result_message_metadata_round_trips_jsonl() -> None:
+    entry = MessageEntry(
+        id="entry-1",
+        message=ToolResultMessage(
+            tool_call_id="call-1",
+            name="edit",
+            content="Successfully replaced 1 block.",
+            ok=True,
+            data={"patch": "--- a.py\n+++ a.py\n@@\n-old\n+new"},
+            details={"first_changed_line": 12},
+        ),
+    )
+
+    line = entry_to_json_line(entry)
+    parsed = entry_from_json_line(line)
+
+    assert parsed == entry
+
+
+def test_compaction_entry_round_trips_jsonl() -> None:
+    entry = CompactionEntry(
+        id="compact",
+        summary="The user asked about session replay.",
+        replaces_entry_ids=["user", "assistant"],
+    )
+
+    line = entry_to_json_line(entry)
+    parsed = entry_from_json_line(line)
+
+    assert parsed == entry
+
+
+def test_invalid_jsonl_line_raises_useful_error() -> None:
+    with pytest.raises(SessionJsonlError, match="Invalid session entry on line 3"):
+        entry_from_json_line('{"type":"unknown"}', line_number=3)
+
+
+@pytest.mark.anyio
+async def test_jsonl_storage_appends_and_reads_entries(tmp_path: Path) -> None:
+    storage = JsonlSessionStorage(tmp_path / "sessions" / "one.jsonl")
+    first = MessageEntry(id="one", message=UserMessage(content="Hi"))
+    second = LabelEntry(id="two", label="Greeting")
+
+    await storage.append(first)
+    await storage.append(second)
+
+    assert await storage.read_all() == [first, second]
+
+
+@pytest.mark.anyio
+async def test_jsonl_storage_missing_file_is_empty(tmp_path: Path) -> None:
+    storage = JsonlSessionStorage(tmp_path / "missing.jsonl")
+
+    assert await storage.read_all() == []
+
+
+def test_session_state_replays_linear_entries() -> None:
+    entries = [
+        MessageEntry(id="user", message=UserMessage(content="Hi")),
+        ModelChangeEntry(id="model", model="fake-model"),
+        MessageEntry(id="assistant", message=AssistantMessage(content="Hello")),
+        LabelEntry(id="label", label="Greeting"),
+        CustomEntry(id="custom", namespace="test", data={"ok": True}),
+        LeafEntry(id="leaf", entry_id="assistant"),
+    ]
+
+    state = SessionState.from_entries(entries)
+
+    assert state.messages == (UserMessage(content="Hi"), AssistantMessage(content="Hello"))
+    assert state.model == "fake-model"
+    assert state.label == "Greeting"
+    assert state.active_leaf_id == "assistant"
+    assert state.custom_entries == (entries[4],)
+    assert state.context_entry_ids == ("user", "assistant")
+
+
+def test_session_state_replays_compaction_as_context_summary() -> None:
+    user = MessageEntry(id="user", message=UserMessage(content="Explain sessions."))
+    assistant = MessageEntry(
+        id="assistant",
+        parent_id="user",
+        message=AssistantMessage(content="Sessions are append-only."),
+    )
+    compaction = CompactionEntry(
+        id="compact",
+        parent_id="assistant",
+        summary="The user asked about sessions. The assistant explained append-only replay.",
+        replaces_entry_ids=["user", "assistant"],
+    )
+    followup = MessageEntry(
+        id="followup",
+        parent_id="compact",
+        message=UserMessage(content="Continue."),
+    )
+
+    state = SessionState.from_entries([user, assistant, compaction, followup])
+
+    assert state.messages == (
+        UserMessage(
+            content=(
+                "Previous conversation summary:\n"
+                "The user asked about sessions. The assistant explained append-only replay."
+            )
+        ),
+        UserMessage(content="Continue."),
+    )
+    assert state.compaction_entries == (compaction,)
+    assert state.context_entry_ids == ("compact", "followup")
+
+
+def test_session_state_inserts_partial_compaction_before_retained_messages() -> None:
+    old_user = MessageEntry(id="old-user", message=UserMessage(content="Old request"))
+    old_assistant = MessageEntry(
+        id="old-assistant",
+        parent_id="old-user",
+        message=AssistantMessage(content="Old answer"),
+    )
+    recent_user = MessageEntry(
+        id="recent-user",
+        parent_id="old-assistant",
+        message=UserMessage(content="Recent request"),
+    )
+    recent_assistant = MessageEntry(
+        id="recent-assistant",
+        parent_id="recent-user",
+        message=AssistantMessage(content="Recent answer"),
+    )
+    compaction = CompactionEntry(
+        id="compact",
+        parent_id="recent-assistant",
+        summary="Older work was summarized.",
+        replaces_entry_ids=["old-user", "old-assistant"],
+    )
+
+    state = SessionState.from_entries(
+        [old_user, old_assistant, recent_user, recent_assistant, compaction]
+    )
+
+    assert state.messages == (
+        UserMessage(content="Previous conversation summary:\nOlder work was summarized."),
+        UserMessage(content="Recent request"),
+        AssistantMessage(content="Recent answer"),
+    )
+    assert state.context_entry_ids == ("compact", "recent-user", "recent-assistant")
+
+
+def test_session_state_replays_branch_summary_as_context_summary() -> None:
+    root = MessageEntry(id="root", message=UserMessage(content="Root"))
+    summary = BranchSummaryEntry(
+        id="branch-summary",
+        parent_id="root",
+        branch_root_id="root",
+        summary="The abandoned branch explored an alternate implementation.",
+    )
+
+    state = SessionState.from_entries([root, summary], leaf_id="branch-summary")
+
+    assert state.messages == (
+        UserMessage(
+            content=(
+                "The following is a summary of a branch that this conversation came back from:\n"
+                "<summary>\n"
+                "The abandoned branch explored an alternate implementation.\n"
+                "</summary>"
+            )
+        ),
+    )
+    assert state.context_entry_ids == ("branch-summary",)
+
+
+def test_path_to_entry_returns_root_to_leaf_branch() -> None:
+    root = MessageEntry(id="root", message=UserMessage(content="Hi"))
+    left = MessageEntry(id="left", parent_id="root", message=AssistantMessage(content="Left"))
+    right = MessageEntry(id="right", parent_id="root", message=AssistantMessage(content="Right"))
+
+    assert path_to_entry([root, left, right], "right") == [root, right]
+
+
+def test_session_state_can_replay_one_branch() -> None:
+    root = MessageEntry(id="root", message=UserMessage(content="Hi"))
+    left = MessageEntry(id="left", parent_id="root", message=AssistantMessage(content="Left"))
+    right = MessageEntry(id="right", parent_id="root", message=AssistantMessage(content="Right"))
+
+    state = SessionState.from_entries([root, left, right], leaf_id="right")
+
+    assert state.messages == (UserMessage(content="Hi"), AssistantMessage(content="Right"))
+    assert state.active_leaf_id == "right"
+    assert state.entries == (root, right)
+
+
+def test_session_state_replays_compaction_on_active_branch() -> None:
+    root = MessageEntry(id="root", message=UserMessage(content="Root"))
+    left = MessageEntry(id="left", parent_id="root", message=AssistantMessage(content="Left"))
+    compact = CompactionEntry(
+        id="compact",
+        parent_id="left",
+        summary="Root and left branch summary.",
+        replaces_entry_ids=["root", "left"],
+    )
+    right = MessageEntry(id="right", parent_id="root", message=AssistantMessage(content="Right"))
+
+    state = SessionState.from_entries([root, left, compact, right], leaf_id="compact")
+
+    assert state.messages == (
+        UserMessage(content="Previous conversation summary:\nRoot and left branch summary."),
+    )
+    assert state.entries == (root, left, compact)
+
+
+def test_path_to_entry_rejects_missing_parent() -> None:
+    entry = MessageEntry(id="child", parent_id="missing", message=UserMessage(content="Hi"))
+
+    with pytest.raises(SessionTreeError, match="Missing session entry"):
+        path_to_entry([entry], "child")

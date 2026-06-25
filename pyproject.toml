@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phi"
+version = "0.1.0"
+description = "A Python implementation of a minimalist Pi-style coding-agent harness."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "anyio>=4.0",
+    "httpx>=0.27",
+    "pydantic>=2.0",
+    "rich>=13.0",
+    "textual>=1.0",
+    "typer>=0.12",
+]
+
+[project.scripts]
+phi = "phi_coding.cli:app"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.10",
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/phi_ai", "src/phi_agent", "src/phi_coding"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+packages = ["phi_ai", "phi_agent", "phi_coding"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
