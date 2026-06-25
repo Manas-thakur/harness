@@ -103,6 +103,9 @@ class LocalLLMClient:
     Optimized for RTX 4060 8GB VRAM with Qwen2.5-7B.
     """
 
+    # Host used for Ollama's hosted (cloud) inference.
+    CLOUD_HOST = "https://ollama.com"
+
     def __init__(
         self,
         model: str = None,
@@ -110,22 +113,36 @@ class LocalLLMClient:
         timeout: int = 120,
         mock: bool = None,
         num_ctx: int = None,
+        api_key: str = None,
     ):
         """
-        Initialize the LLM client.
+        Initialize the LLM client. Works against a local Ollama daemon (default)
+        or Ollama's hosted cloud, transparently.
 
         Args:
-            model: Model name to use (default: env OLLAMA_MODEL or qwen3:8b)
-            host: Ollama server host URL (default: env OLLAMA_HOST or localhost)
+            model: Model name to use (default: env OLLAMA_MODEL or qwen3:8b). Any
+                model available to the target host works, including Ollama Cloud
+                models (typically suffixed ``-cloud``).
+            host: Ollama server host URL. Defaults to env OLLAMA_HOST, or the
+                cloud host when only an API key is configured, else localhost.
             timeout: Request timeout in seconds
             mock: Force offline mock mode. If None, mock is used automatically
-                  whenever Ollama is not reachable.
+                  whenever the target host is not reachable.
             num_ctx: Ollama context window (tokens). Ollama otherwise defaults to
                 ~2048, which silently truncates the soul/memory/tool context and
                 makes the model fabricate. Default: env OLLAMA_NUM_CTX or 8192.
+            api_key: Ollama API key for cloud auth (default: env OLLAMA_API_KEY).
+                When set, requests are authenticated; cloud is opt-in.
         """
         self.model = model or os.environ.get("OLLAMA_MODEL", "qwen3:8b")
-        self.host = host or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+        self.api_key = api_key or os.environ.get("OLLAMA_API_KEY")
+        # Host precedence: explicit arg > OLLAMA_HOST > cloud (if a key but no
+        # local host is configured and the model is a cloud model) > localhost.
+        default_host = os.environ.get("OLLAMA_HOST")
+        if not default_host:
+            default_host = (self.CLOUD_HOST if self._looks_cloud(self.model, self.api_key)
+                            else "http://localhost:11434")
+        self.host = host or default_host
         self.timeout = timeout
         try:
             self.num_ctx = int(num_ctx if num_ctx is not None
@@ -134,10 +151,16 @@ class LocalLLMClient:
             self.num_ctx = 8192
 
         # Build a dedicated client bound to this host (avoids mutating globals).
+        # An Authorization header is attached when an API key is present; the
+        # ollama client also reads OLLAMA_API_KEY itself, so cloud auth works
+        # either way.
         self._client = None
         if ollama is not None:
             try:
-                self._client = ollama.Client(host=self.host, timeout=timeout)
+                kwargs = {"host": self.host, "timeout": timeout}
+                if self.api_key:
+                    kwargs["headers"] = {"Authorization": f"Bearer {self.api_key}"}
+                self._client = ollama.Client(**kwargs)
             except Exception:
                 self._client = None
 
@@ -151,8 +174,23 @@ class LocalLLMClient:
         else:
             self.mock = not self._reachable()
 
+    @staticmethod
+    def _looks_cloud(model: str, api_key: str = None) -> bool:
+        """Heuristic: does this look like an Ollama Cloud setup?
+
+        Cloud models are conventionally suffixed ``-cloud``. An API key alone
+        does not force cloud (you may use a key with a local proxy), so it only
+        tips host selection when combined with a cloud-looking model.
+        """
+        return bool(model) and model.endswith("-cloud")
+
+    @property
+    def is_cloud(self) -> bool:
+        """True when this client targets Ollama's hosted cloud."""
+        return "ollama.com" in (self.host or "") or (self.model or "").endswith("-cloud")
+
     def _reachable(self) -> bool:
-        """Quick probe to see if the Ollama daemon answers."""
+        """Quick probe to see if the target Ollama host answers."""
         if self._client is None:
             return False
         try:
@@ -373,10 +411,19 @@ class LocalLLMClient:
             if msg.get("role") == "user":
                 last_user = msg.get("content", "")
                 break
+        if self.is_cloud:
+            hint = (
+                "Ollama Cloud isn't reachable. Sign in with `ollama signin` (or "
+                "set OLLAMA_API_KEY) and check the model name."
+            )
+        else:
+            hint = (
+                "Start Ollama and pull a model "
+                f"(`ollama pull {self.model}`) to get real answers."
+            )
         text = (
-            "[offline mock] Ollama isn't reachable, so I'm echoing a stub "
-            "response. Start Ollama and pull a model "
-            f"(`ollama pull {self.model}`) to get real answers.\n\n"
+            f"[offline mock] No model backend reachable, so I'm echoing a stub "
+            f"response. {hint}\n\n"
             f"You said: {last_user.strip()[:280]}"
         )
         for word in text.split(" "):

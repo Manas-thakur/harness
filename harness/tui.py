@@ -50,7 +50,7 @@ SLASH_COMMANDS = {
     "/agents": "List specialist agents and their tools",
     "/tools": "List available tools",
     "/status": "Show system status",
-    "/model": "Show or switch the active model",
+    "/model": "Show or switch model (local or Ollama Cloud)",
     "/dream": "Consolidate recent sessions into memory",
     "/remember": "Store a fact in long-term memory",
     "/recall": "Search long-term memory",
@@ -136,7 +136,12 @@ class AgentTUI:
 
     def _bottom_toolbar(self):
         """Pinned status line below the input box."""
-        backend = "offline·mock" if self.llm.mock else "ollama·connected"
+        if self.llm.mock:
+            backend = "offline·mock"
+        elif self.llm.is_cloud:
+            backend = "cloud"
+        else:
+            backend = "local"
         agent = self.coordinator.last_agent or "—"
         return HTML(
             f' <b><style fg="#5fd7ff">{APP_NAME}</style></b> '
@@ -155,7 +160,9 @@ class AgentTUI:
     def _backend_label(self) -> Text:
         if self.llm.mock:
             return Text("offline (mock)", style="bold yellow")
-        return Text("ollama · connected", style="bold green")
+        if self.llm.is_cloud:
+            return Text("ollama cloud · connected", style="bold magenta")
+        return Text("ollama local · connected", style="bold green")
 
     # -- rendering --------------------------------------------------------
 
@@ -305,7 +312,7 @@ class AgentTUI:
             ("/agents", "List specialist agents and their tools"),
             ("/tools", "List available tools"),
             ("/status", "Show system status"),
-            ("/model [name]", "Show or switch the active model"),
+            ("/model [name]", "Show or switch model (local or -cloud)"),
             ("/dream [n] [--activate]", "Consolidate recent sessions into memory"),
             ("/remember <fact>", "Store a fact in long-term memory"),
             ("/recall <query>", "Search long-term memory"),
@@ -370,18 +377,40 @@ class AgentTUI:
     def _cmd_model(self, args):
         if not args:
             installed = self.llm.list_models()
-            body = Text(f"current: {self.llm.model}\n", style="cyan")
+            body = Text()
+            body.append("current: ", style="dim")
+            body.append(f"{self.llm.model}", style="cyan")
+            body.append("  (cloud)\n" if self.llm.is_cloud else "  (local)\n",
+                        style="magenta" if self.llm.is_cloud else "green")
             if installed:
-                body.append("installed: " + ", ".join(installed), style="dim")
+                body.append("local models: ", style="dim")
+                body.append(", ".join(installed) + "\n")
             else:
-                body.append("no models reported (Ollama offline)", style="dim")
+                body.append("no local models reported (daemon offline?)\n", style="dim")
+            body.append("\nswitch with ", style="dim")
+            body.append("/model <name>", style="cyan")
+            body.append("  — any model on the target host works.\n", style="dim")
+            body.append("cloud: ", style="magenta")
+            body.append("run `ollama signin` (or set OLLAMA_API_KEY), then pick a "
+                        "cloud model, e.g. ", style="dim")
+            body.append("/model qwen3-coder:480b-cloud", style="cyan")
             self.console.print(Panel(body, title="[bold]model[/bold]",
                                      border_style="cyan", box=box.ROUNDED))
             return
+
         new_model = args[0]
-        self.coordinator.llm = LocalLLMClient(model=new_model)
-        mode = "offline mock" if self.llm.mock else "connected"
-        self.console.print(f"[green]✓ switched to[/green] [cyan]{new_model}[/cyan] [dim]({mode})[/dim]")
+        # Preserve the tuned context window across the switch; host/API key are
+        # resolved from the environment (and the -cloud suffix) automatically.
+        self.coordinator.llm = LocalLLMClient(model=new_model, num_ctx=self.llm.num_ctx)
+        if self.llm.mock:
+            if self.llm.is_cloud and not self.llm.api_key:
+                hint = "offline — cloud needs `ollama signin` or OLLAMA_API_KEY"
+            else:
+                hint = "offline mock — backend unreachable"
+        else:
+            hint = "cloud" if self.llm.is_cloud else "local"
+        self.console.print(
+            f"[green]✓ switched to[/green] [cyan]{new_model}[/cyan] [dim]({hint})[/dim]")
 
     def _cmd_dream(self, args):
         activate = "--activate" in args
