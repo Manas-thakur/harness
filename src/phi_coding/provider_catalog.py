@@ -249,6 +249,31 @@ BUILTIN_PROVIDER_CATALOG: tuple[ProviderCatalogEntry, ...] = (
         thinking_default="medium",
         thinking_parameter="reasoning_effort",
     ),
+    ProviderCatalogEntry(
+        # Ollama's hosted (cloud) inference — opt-in, OpenAI-compatible at
+        # ollama.com. Needs an API key (`ollama signin` or OLLAMA_API_KEY).
+        # Models are large hosted ones; any model on ollama.com works — these
+        # are common defaults users can change. Discovery is off (the local
+        # /api/tags endpoint can't enumerate cloud models).
+        name="ollama-cloud",
+        display_name="Ollama (cloud)",
+        kind="openai-compatible",
+        base_url="https://ollama.com/v1",
+        api_key_env="OLLAMA_API_KEY",
+        credential_name="ollama-cloud",
+        models=(
+            "gpt-oss:120b",
+            "gpt-oss:20b",
+            "qwen3-coder:480b",
+            "deepseek-v3.1:671b",
+            "kimi-k2:1t",
+            "glm-4.6",
+        ),
+        default_model="gpt-oss:120b",
+        docs_url="https://docs.ollama.com/cloud",
+        requires_api_key=True,
+        discover_models=False,
+    ),
 )
 
 
