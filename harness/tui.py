@@ -24,9 +24,70 @@ from rich import box
 from harness.coordinator import Coordinator
 from harness.llm_client import LocalLLMClient
 
+# prompt_toolkit powers the Claude-Code-style pinned input box (history, slash
+# autocomplete, keybindings). It is optional: when absent we fall back to a
+# plain line prompt so the TUI still runs in minimal/offline environments.
+try:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import Completer, Completion
+    from prompt_toolkit.history import InMemoryHistory
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.formatted_text import HTML
+    from prompt_toolkit.styles import Style
+    from prompt_toolkit.patch_stdout import patch_stdout
+    _HAS_PTK = True
+except ImportError:  # pragma: no cover - exercised only without prompt_toolkit
+    _HAS_PTK = False
 
-APP_NAME = "harness"
+
+APP_NAME = "menace"
 VERSION = "0.1.0"
+
+# Slash commands offered by the autocomplete menu (command -> one-line help).
+SLASH_COMMANDS = {
+    "/help": "Show available commands",
+    "/memory": "View the agent's long-term memory",
+    "/agents": "List specialist agents and their tools",
+    "/tools": "List available tools",
+    "/status": "Show system status",
+    "/model": "Show or switch the active model",
+    "/dream": "Consolidate recent sessions into memory",
+    "/remember": "Store a fact in long-term memory",
+    "/recall": "Search long-term memory",
+    "/clear": "Reset the conversation and clear the screen",
+    "/quit": "Exit",
+}
+
+
+def slash_completions(text: str):
+    """Return ``(command, help)`` pairs matching a partial slash command.
+
+    Completion applies only to the command token itself: an empty string or a
+    leading ``/`` with no space yet. Once the user types a space (arguments),
+    nothing is suggested. Kept module-level so it is unit-testable without
+    prompt_toolkit installed.
+    """
+    if " " in text:
+        return []
+    if text and not text.startswith("/"):
+        return []
+    return [(cmd, help_) for cmd, help_ in SLASH_COMMANDS.items()
+            if cmd.startswith(text)]
+
+
+if _HAS_PTK:
+    class _SlashCompleter(Completer):
+        """prompt_toolkit completer that pops slash commands after ``/``."""
+
+        def get_completions(self, document, complete_event):
+            text = document.text_before_cursor
+            for cmd, help_ in slash_completions(text):
+                yield Completion(
+                    cmd,
+                    start_position=-len(text),
+                    display=cmd,
+                    display_meta=help_,
+                )
 
 
 class AgentTUI:
@@ -41,6 +102,49 @@ class AgentTUI:
         )
         self.running = True
         self.message_count = 0
+        self.session = self._build_session()
+
+    # -- input layer (prompt_toolkit) -------------------------------------
+
+    def _build_session(self):
+        """Create the pinned-input prompt session, or None if unavailable."""
+        if not _HAS_PTK:
+            return None
+
+        kb = KeyBindings()
+
+        @kb.add("c-l")
+        def _(event):
+            # Ctrl+L: clear the conversation and redraw the banner.
+            event.app.exit(result="/clear")
+
+        style = Style.from_dict({
+            "prompt": "bold cyan",
+            "bottom-toolbar": "bg:#222222 #888888",
+            "bottom-toolbar.name": "bold #5fd7ff",
+        })
+
+        return PromptSession(
+            history=InMemoryHistory(),
+            completer=_SlashCompleter(),
+            complete_while_typing=True,
+            key_bindings=kb,
+            bottom_toolbar=self._bottom_toolbar,
+            style=style,
+            placeholder=HTML('<style fg="#666666">Type a message, or / for commands…</style>'),
+        )
+
+    def _bottom_toolbar(self):
+        """Pinned status line below the input box."""
+        backend = "offline·mock" if self.llm.mock else "ollama·connected"
+        agent = self.coordinator.last_agent or "—"
+        return HTML(
+            f' <b><style fg="#5fd7ff">{APP_NAME}</style></b> '
+            f' model <b>{self.llm.model}</b> '
+            f' backend <b>{backend}</b> '
+            f' agent <b>{agent}</b> '
+            f' turn <b>{self.coordinator.current_turn}/{self.coordinator.max_turns}</b> '
+        )
 
     # -- helpers ----------------------------------------------------------
 
@@ -210,8 +314,15 @@ class AgentTUI:
         ]
         for k, v in rows:
             t.add_row(k, v)
-        self.console.print(Panel(t, title="[bold]commands[/bold]", border_style="cyan",
-                                 box=box.ROUNDED))
+        keys = Text()
+        keys.append("keys  ", style="dim")
+        keys.append("↑/↓", style="cyan"); keys.append(" history   ", style="dim")
+        keys.append("\\ + Enter", style="cyan"); keys.append(" newline   ", style="dim")
+        keys.append("Ctrl+C", style="cyan"); keys.append(" cancel   ", style="dim")
+        keys.append("Ctrl+L", style="cyan"); keys.append(" clear   ", style="dim")
+        keys.append("Ctrl+D", style="cyan"); keys.append(" exit", style="dim")
+        self.console.print(Panel(Group(t, Text(""), keys), title="[bold]commands[/bold]",
+                                 border_style="cyan", box=box.ROUNDED))
 
     def _cmd_memory(self):
         try:
@@ -329,19 +440,48 @@ class AgentTUI:
 
     # -- main loop --------------------------------------------------------
 
-    def prompt(self) -> str:
+    def _read_line(self, continuation: bool = False) -> str:
+        """Read a single physical line from the pinned box (or fallback)."""
+        if self.session is None:
+            mark = "[bold cyan]…[/bold cyan] " if continuation else "[bold cyan]›[/bold cyan] "
+            try:
+                return self.console.input(mark)
+            except EOFError:
+                return "/quit"
+            except KeyboardInterrupt:
+                return ""
+        marker = '<style fg="#5fd7ff">… </style>' if continuation else '<style fg="#5fd7ff">› </style>'
         try:
-            return self.console.input("[bold cyan]›[/bold cyan] ").strip()
-        except (EOFError, KeyboardInterrupt):
-            return "/quit"
+            # patch_stdout keeps rich output above the pinned input box.
+            with patch_stdout(raw=True):
+                text = self.session.prompt(HTML(marker))
+            return text if text is not None else ""
+        except EOFError:
+            return "/quit"          # Ctrl+D
+        except KeyboardInterrupt:
+            return ""               # Ctrl+C at the prompt: cancel the line
+
+    def prompt(self) -> str:
+        """Read user input, honoring trailing-backslash line continuation.
+
+        Returns the assembled input, or sentinel strings: ``/quit`` on EOF
+        (Ctrl+D) and ``""`` on an empty Ctrl+C (cancel, stay in the loop).
+        """
+        line = self._read_line()
+        if line in ("", "/quit"):
+            return line.strip()
+        # Backslash at end of a line means "continue on the next line".
+        while line.rstrip().endswith("\\"):
+            cont = self._read_line(continuation=True)
+            if cont == "/quit":
+                break
+            line = line.rstrip()[:-1] + "\n" + cont
+        return line.strip()
 
     def run(self):
         self.render_banner()
         while self.running:
-            try:
-                user_input = self.prompt()
-            except KeyboardInterrupt:
-                break
+            user_input = self.prompt()
             if not user_input:
                 continue
             if user_input.startswith("/"):
@@ -350,7 +490,8 @@ class AgentTUI:
             try:
                 self.handle_message(user_input)
             except KeyboardInterrupt:
-                self.console.print("\n[yellow]⏹ interrupted[/yellow]\n")
+                # Ctrl+C during generation cancels the turn without quitting.
+                self.console.print("\n[yellow]⏹ generation cancelled[/yellow]\n")
                 continue
 
         # Persist the session transcript on exit so dreaming has material.
