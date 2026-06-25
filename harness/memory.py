@@ -507,8 +507,8 @@ class MemoryStore:
         content = self.read_active()
         lines = content.split('\n')
 
-        sections = [l for l in lines if l.strip().startswith('##')]
-        entries = [l for l in lines if l.strip().startswith('###')]
+        sections = [line for line in lines if line.strip().startswith('##')]
+        entries = [line for line in lines if line.strip().startswith('###')]
 
         from harness.token_counter import TokenCounter
         counter = TokenCounter()

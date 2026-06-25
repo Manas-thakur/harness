@@ -290,22 +290,22 @@ class Config:
 
     def _convert_value(self, value: str, target_type: type) -> Any:
         """Convert string value to target type"""
-        if target_type == bool:
+        if target_type is bool:
             return value.lower() in ("true", "1", "yes", "on")
-        elif target_type == int:
+        elif target_type is int:
             try:
                 return int(value)
             except ValueError:
                 return 0
-        elif target_type == float:
+        elif target_type is float:
             try:
                 return float(value)
             except ValueError:
                 return 0.0
-        elif target_type == list:
+        elif target_type is list:
             # Parse comma-separated list
             return [item.strip() for item in value.split(",")]
-        elif target_type == dict:
+        elif target_type is dict:
             # Try to parse as JSON
             try:
                 return json.loads(value)
