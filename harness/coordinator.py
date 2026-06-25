@@ -11,8 +11,7 @@ from harness.hooks import HookDispatcher
 from harness.token_counter import TokenCounter
 from harness.memory import MemoryStore
 from harness.tools import ToolRegistry
-from harness.agents import get_agent, ResearchAgent, TutorAgent, CoderAgent, DreamerAgent
-from harness.threads import AgentThread
+from harness.agents import ResearchAgent, TutorAgent, CoderAgent, DreamerAgent
 
 
 class Coordinator:
