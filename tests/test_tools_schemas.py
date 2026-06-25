@@ -42,7 +42,7 @@ class TestWebSearch:
             def __exit__(self, *a):
                 return False
 
-            def text(self, query, max_results=5):
+            def text(self, query, max_results=5, **kwargs):
                 if raise_exc:
                     raise raise_exc
                 return results or []

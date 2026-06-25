@@ -44,6 +44,14 @@ TOOL_SCHEMAS: Dict[str, dict] = {
         },
         ["query"],
     ),
+    "fetch_url": _fn(
+        "fetch_url",
+        "Fetch a web page and return its readable text. Use this AFTER search_web "
+        "to read a result's actual page before stating facts — never rely on "
+        "snippets alone for specific claims.",
+        {"url": {"type": "string", "description": "The full URL to fetch."}},
+        ["url"],
+    ),
     "read_file": _fn(
         "read_file",
         "Read the contents of a file from disk.",
@@ -195,6 +203,7 @@ class ToolRegistry:
     def _register_builtin_tools(self):
         """Register all built-in free tools."""
         self.tools["search_web"] = self._search_web
+        self.tools["fetch_url"] = self._fetch_url
         self.tools["read_file"] = self._read_file
         self.tools["write_file"] = self._write_file
         self.tools["edit_file"] = self._edit_file
@@ -282,18 +291,31 @@ class ToolRegistry:
         query = (input.get("query") or "").strip()
         if not query:
             return "Error: no search query provided."
-        max_results = input.get("max_results", 5)
+        try:
+            max_results = int(input.get("max_results", 8))
+        except (TypeError, ValueError):
+            max_results = 8
 
         try:
             with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=max_results))
+                # region + safesearch improve relevance; cast to list to catch
+                # backend errors here rather than mid-iteration.
+                results = list(ddgs.text(
+                    query,
+                    region="wt-wt",
+                    safesearch="moderate",
+                    max_results=max_results,
+                ))
         except Exception as e:
             return f"Search failed (network or backend error): {str(e)}"
 
         if not results:
-            return f"No results found for: {query}"
+            return (f"No results found for: {query}. Try a simpler or differently "
+                    "worded query; do not guess the answer.")
 
-        output = []
+        output = [f"Search results for: {query}",
+                  "(Use fetch_url on a result's URL to read the full page before "
+                  "stating facts.)\n"]
         for i, r in enumerate(results, 1):
             # Field names differ slightly across backend versions.
             title = r.get("title", "")
@@ -304,6 +326,54 @@ class ToolRegistry:
             output.append(f"   URL: {url}\n")
 
         return truncate_output("\n".join(output))
+
+    def _fetch_url(self, input: Dict) -> str:
+        """
+        Fetch a web page and return its readable text (not raw HTML).
+
+        Lets the agent ground answers in actual page content instead of guessing
+        from search snippets. Input: {"url": str}
+        """
+        url = (input.get("url") or "").strip()
+        if not url:
+            return "Error: no url provided."
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        try:
+            import httpx
+        except ImportError:
+            return "Error: httpx not installed. Run: pip install httpx"
+
+        try:
+            headers = {"User-Agent": "Mozilla/5.0 (compatible; menace/1.0)"}
+            resp = httpx.get(url, headers=headers, follow_redirects=True, timeout=20)
+            resp.raise_for_status()
+        except Exception as e:
+            return f"Error fetching {url}: {str(e)}"
+
+        text = self._html_to_text(resp.text)
+        if not text.strip():
+            return f"Fetched {url} but found no readable text."
+        return truncate_output(f"Content of {url}:\n\n{text}")
+
+    @staticmethod
+    def _html_to_text(html: str) -> str:
+        """Extract readable text from HTML, dropping script/style/markup."""
+        try:
+            from lxml import html as lxml_html
+            doc = lxml_html.fromstring(html)
+            for bad in doc.xpath("//script | //style | //noscript"):
+                bad.getparent().remove(bad)
+            text = doc.text_content()
+        except Exception:
+            # Fallback: crude tag strip if lxml is unavailable or parsing fails.
+            import re as _re
+            text = _re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html,
+                           flags=_re.DOTALL | _re.IGNORECASE)
+            text = _re.sub(r"<[^>]+>", " ", text)
+        # Collapse whitespace.
+        import re as _re
+        return _re.sub(r"\n\s*\n\s*", "\n\n", _re.sub(r"[ \t]+", " ", text)).strip()
 
     def _read_file(self, input: Dict) -> str:
         """

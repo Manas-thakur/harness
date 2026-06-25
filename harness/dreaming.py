@@ -41,7 +41,7 @@ Return ONLY the updated Markdown memory. Do not include conversational text like
         self, 
         sessions_dir: str = "sessions", 
         dreams_dir: str = "dreams",
-        model: str = "qwen2.5:7b"
+        model: str = "qwen3:8b"
     ):
         """
         Initialize dreaming engine.

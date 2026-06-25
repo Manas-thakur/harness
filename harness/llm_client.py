@@ -109,20 +109,29 @@ class LocalLLMClient:
         host: str = None,
         timeout: int = 120,
         mock: bool = None,
+        num_ctx: int = None,
     ):
         """
         Initialize the LLM client.
 
         Args:
-            model: Model name to use (default: env OLLAMA_MODEL or qwen2.5:7b)
+            model: Model name to use (default: env OLLAMA_MODEL or qwen3:8b)
             host: Ollama server host URL (default: env OLLAMA_HOST or localhost)
             timeout: Request timeout in seconds
             mock: Force offline mock mode. If None, mock is used automatically
                   whenever Ollama is not reachable.
+            num_ctx: Ollama context window (tokens). Ollama otherwise defaults to
+                ~2048, which silently truncates the soul/memory/tool context and
+                makes the model fabricate. Default: env OLLAMA_NUM_CTX or 8192.
         """
-        self.model = model or os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+        self.model = model or os.environ.get("OLLAMA_MODEL", "qwen3:8b")
         self.host = host or os.environ.get("OLLAMA_HOST", "http://localhost:11434")
         self.timeout = timeout
+        try:
+            self.num_ctx = int(num_ctx if num_ctx is not None
+                               else os.environ.get("OLLAMA_NUM_CTX", 8192))
+        except (TypeError, ValueError):
+            self.num_ctx = 8192
 
         # Build a dedicated client bound to this host (avoids mutating globals).
         self._client = None
@@ -178,7 +187,8 @@ class LocalLLMClient:
                 messages=messages,
                 options={
                     "temperature": temperature,
-                    "num_predict": 4096  # Limit max tokens
+                    "num_predict": 4096,   # Limit max tokens
+                    "num_ctx": self.num_ctx,
                 },
                 stream=stream
             )
@@ -187,11 +197,25 @@ class LocalLLMClient:
                 content = ""
                 for chunk in response:
                     content += chunk.get('message', {}).get('content', '')
-                return content
-            return response['message']['content']
+                return self._strip_think(content)
+            return self._strip_think(response['message']['content'])
 
         except Exception as e:
             raise RuntimeError(f"LLM request failed: {str(e)}")
+
+    @staticmethod
+    def _strip_think(text: str) -> str:
+        """Remove qwen3-style ``<think>…</think>`` reasoning blocks from output.
+
+        Qwen3 and other reasoning models emit an internal monologue wrapped in
+        ``<think>`` tags. It must never reach the transcript or the tool parser.
+        """
+        if not text:
+            return text
+        # Drop complete think blocks, then any dangling unterminated opener.
+        cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+        cleaned = re.sub(r"<think>.*$", "", cleaned, flags=re.DOTALL)
+        return cleaned.strip()
 
     def chat_with_tools(
         self,
@@ -226,7 +250,11 @@ class LocalLLMClient:
                 model=self.model,
                 messages=messages,
                 tools=tools or None,
-                options={"temperature": temperature, "num_predict": 4096},
+                options={
+                    "temperature": temperature,
+                    "num_predict": 4096,
+                    "num_ctx": self.num_ctx,
+                },
                 stream=False,
             )
         except Exception as e:
@@ -246,7 +274,8 @@ class LocalLLMClient:
             content = getattr(message, "content", "") or ""
             raw_calls = getattr(message, "tool_calls", None)
 
-        return {"content": content, "tool_calls": self._normalize_tool_calls(raw_calls)}
+        return {"content": self._strip_think(content),
+                "tool_calls": self._normalize_tool_calls(raw_calls)}
 
     @staticmethod
     def _normalize_tool_calls(raw_calls) -> List[Dict[str, Any]]:
@@ -299,11 +328,32 @@ class LocalLLMClient:
             response = self._client.chat(
                 model=self.model,
                 messages=messages,
-                options={"temperature": temperature, "num_predict": 4096},
+                options={
+                    "temperature": temperature,
+                    "num_predict": 4096,
+                    "num_ctx": self.num_ctx,
+                },
                 stream=True,
             )
+            in_think = False
             for chunk in response:
                 piece = chunk.get('message', {}).get('content', '')
+                if not piece:
+                    continue
+                # Suppress any <think>…</think> reasoning while streaming.
+                if in_think:
+                    if "</think>" in piece:
+                        piece = piece.split("</think>", 1)[1]
+                        in_think = False
+                    else:
+                        continue
+                if "<think>" in piece:
+                    before, _, after = piece.partition("<think>")
+                    if "</think>" in after:
+                        piece = before + after.split("</think>", 1)[1]
+                    else:
+                        piece = before
+                        in_think = True
                 if piece:
                     yield piece
         except Exception as e:

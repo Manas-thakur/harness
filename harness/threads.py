@@ -54,15 +54,32 @@ class AgentThread:
 
     def add_tool_call(self, tool_name: str, tool_input: dict, result: str):
         """
-        Add a tool call and its result to the history.
-        
+        Add a tool call and its result to the history as STRUCTURED messages.
+
+        Uses the OpenAI/Ollama function-calling shape — an assistant message
+        carrying ``tool_calls`` followed by a ``role: "tool"`` result — rather
+        than the old ``[Calling X]`` prose. The prose form both failed to ground
+        the model and trained it (by example) to emit tool calls as plain text.
+
         Args:
             tool_name: Name of tool called
             tool_input: Tool input arguments
             result: Tool execution result
         """
-        self.add_message("assistant", f"[Calling {tool_name}]")
-        self.add_message("tool", f"[{tool_name} Result]: {result}")
+        self.history.append({
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "type": "function",
+                "function": {"name": tool_name, "arguments": tool_input or {}},
+            }],
+        })
+        self.history.append({
+            "role": "tool",
+            "name": tool_name,
+            "content": result if isinstance(result, str) else str(result),
+        })
+        self.last_active = time.time()
         self.total_tool_calls += 1
 
     def get_context(self) -> List[Dict[str, str]]:
