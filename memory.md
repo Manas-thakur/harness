@@ -1,16 +1,5 @@
-# Agent Memory
+# Legacy Memory Archived
 
-## Active Topics
-[Currently researching or working on]
-
-## Verified Facts
-[Key information learned from sessions]
-
-## User Preferences
-[How the user likes things explained, formatting rules]
-
-## Patterns & Insights
-[Cross-session observations]
-
-## Action Items
-[Next steps or pending tasks]
+This file has been migrated to the Neural Markdown Mesh.
+Archive location: archived_memory.md
+Migration date: 2026-06-24T23:55:31.457067
