@@ -96,7 +96,7 @@ class AgentTUI:
     def __init__(self, model: str = None, mock: bool = None, max_turns: int = 20):
         self.console = Console()
         self.coordinator = Coordinator(
-            model=model or os.environ.get("OLLAMA_MODEL", "qwen2.5:7b"),
+            model=model or os.environ.get("OLLAMA_MODEL", "qwen3:8b"),
             max_turns=max_turns,
             mock=mock,
         )
@@ -433,8 +433,7 @@ class AgentTUI:
     def _cmd_clear(self):
         for agent in self.coordinator.agents.values():
             agent.reset_thread()
-        self.coordinator.current_turn = 0
-        self.coordinator.session_transcript = []
+        self.coordinator.reset_conversation()
         self.message_count = 0
         self.render_banner()
 
@@ -500,7 +499,29 @@ class AgentTUI:
                 self.coordinator.save_session_transcript()
         except Exception:
             pass
+        self._auto_consolidate_on_exit()
         self.console.print("\n[dim]bye 👋[/dim]")
+
+    def _auto_consolidate_on_exit(self):
+        """Close the self-improvement loop: consolidate this session into memory.
+
+        Best-effort and flag-guarded (set AGENT_AUTO_DREAM=0 to disable). Snapshots
+        memory via VersioningSystem before activating, so it's always recoverable.
+        Skipped in offline mock mode and when there was nothing to consolidate.
+        """
+        if os.environ.get("AGENT_AUTO_DREAM", "1").lower() in ("0", "false", "no"):
+            return
+        if self.llm.mock or not self.coordinator.session_transcript:
+            return
+        try:
+            from harness.dreaming import DreamingEngine
+            self.console.print("\n[magenta]🌙 consolidating this session into memory…[/magenta]")
+            engine = DreamingEngine()
+            result = engine.run_dreaming_cycle(max_sessions=3)
+            if result and engine.activate_dream(result):
+                self.console.print("[green]✓ memory updated (snapshot saved first).[/green]")
+        except Exception as e:
+            self.console.print(f"[dim]consolidation skipped: {e}[/dim]")
 
 
 def run_tui(model: str = None, mock: bool = None):

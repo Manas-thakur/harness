@@ -107,7 +107,7 @@ pause
     # Create .agent_env.sh
     env_sh = bundle_path / ".agent_env.sh"
     env_sh.write_text(f"""# Environment variables for {name}
-export AGENT_MODEL_NAME="qwen2.5:7b"
+export AGENT_MODEL_NAME="qwen3:8b"
 export AGENT_MEMORY_DIR="{bundle_path}/memory"
 export AGENT_DASHBOARD_ENABLED="true"
 export AGENT_LOCAL_MODE="true"

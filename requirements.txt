@@ -11,6 +11,9 @@ ollama>=0.3.0
 # Web Search (Free, No API Key)
 # Package was renamed duckduckgo-search -> ddgs; code prefers ddgs, falls back.
 ddgs>=6.0.0
+# Page fetching for the fetch_url tool (read full pages, not just snippets).
+httpx>=0.27.0
+lxml>=4.9.0
 
 # PDF Reading
 pypdf>=3.0.0

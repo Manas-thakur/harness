@@ -14,8 +14,9 @@ from pathlib import Path
 @dataclass
 class ModelConfig:
     """LLM Model configuration"""
-    model_name: str = "qwen2.5:7b"
+    model_name: str = "qwen3:8b"
     context_window: int = 32768
+    num_ctx: int = 8192          # Ollama runtime context window (must be set explicitly)
     max_tokens: int = 4096
     temperature: float = 0.7
     top_p: float = 1.0

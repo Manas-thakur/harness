@@ -93,7 +93,7 @@ All running on a single RTX 4060 8GB GPU with Qwen2.5-7B, zero external APIs, an
 ### 1. Install Ollama
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull qwen2.5:7b
+ollama pull qwen3:8b
 ```
 
 ### 2. Install System Dependencies
@@ -151,7 +151,7 @@ everything:
 
 > **No Ollama? No problem.** If the Ollama daemon isn't reachable the TUI runs
 > in **offline mock mode** so the interface stays fully usable. Start Ollama and
-> `ollama pull qwen2.5:7b` for real answers.
+> `ollama pull qwen3:8b` for real answers.
 
 ### Scripted commands
 
@@ -345,7 +345,7 @@ Create `.env` file (optional):
 ```bash
 # Ollama settings
 OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:7b
+OLLAMA_MODEL=qwen3:8b
 
 # Tool limits
 MAX_TOOL_CHARS=4000
