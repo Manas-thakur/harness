@@ -5,8 +5,6 @@ Auto-detects backends and provides unified interface.
 """
 
 import asyncio
-import os
-import subprocess
 import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -23,13 +21,13 @@ class ModelInfo:
 
 class LocalLLMProvider:
     """Unified local LLM provider supporting Ollama and GGUF."""
-    
+
     def __init__(self, model_path: Optional[str] = None):
         self.model_path = model_path
         self.backend: Optional[str] = None
         self.model_info: Optional[ModelInfo] = None
         self._session = None
-    
+
     async def initialize(self) -> bool:
         """Initialize the provider and detect backend."""
         # Try Ollama first
@@ -41,15 +39,15 @@ class LocalLLMProvider:
                 # Default to llama3.1
                 self.model_info = ModelInfo(name='llama3.1', backend='ollama')
             return True
-        
+
         # Fall back to GGUF
         if self.model_path and Path(self.model_path).exists():
             self.backend = 'gguf'
             self.model_info = ModelInfo(name=self.model_path, backend='gguf')
             return True
-        
+
         return False
-    
+
     async def _check_ollama(self) -> bool:
         """Check if Ollama is running."""
         try:
@@ -65,11 +63,11 @@ class LocalLLMProvider:
         except Exception:
             pass
         return False
-    
+
     async def list_models(self) -> List[ModelInfo]:
         """List available models."""
         models = []
-        
+
         if self.backend == 'ollama':
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -87,9 +85,9 @@ class LocalLLMProvider:
                     ))
             except Exception:
                 pass
-        
+
         return models
-    
+
     async def generate(
         self,
         prompt: str,
@@ -105,7 +103,7 @@ class LocalLLMProvider:
             return await self._gguf_generate(prompt, system, max_tokens, temperature, stream)
         else:
             raise RuntimeError("No backend initialized")
-    
+
     async def _ollama_generate(
         self,
         prompt: str,
@@ -116,7 +114,7 @@ class LocalLLMProvider:
     ):
         """Generate using Ollama API."""
         model_name = self.model_info.name if self.model_info else 'llama3.1'
-        
+
         payload = {
             'model': model_name,
             'prompt': prompt,
@@ -126,10 +124,10 @@ class LocalLLMProvider:
                 'temperature': temperature
             }
         }
-        
+
         if system:
             payload['system'] = system
-        
+
         import aiohttp
         async with aiohttp.ClientSession() as session:
             async with session.post(
@@ -144,7 +142,7 @@ class LocalLLMProvider:
                 else:
                     data = await resp.json()
                     yield data.get('response', '')
-    
+
     async def _gguf_generate(
         self,
         prompt: str,
@@ -156,53 +154,53 @@ class LocalLLMProvider:
         """Generate using llama-cpp-python (GGUF)."""
         try:
             from llama_cpp import Llama
-            
+
             llm = Llama(
                 model_path=self.model_path,
                 n_ctx=self.model_info.context_window if self.model_info else 4096,
                 n_gpu_layers=-1  # Auto GPU offload
             )
-            
+
             full_prompt = f"<|system|>\n{system or 'You are a helpful assistant.'}\n<|user|>\n{prompt}\n<|assistant|>\n"
-            
+
             output = llm(
                 full_prompt,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 stream=stream
             )
-            
+
             if stream:
                 for chunk in output:
                     yield chunk['choices'][0]['text']
             else:
                 yield output['choices'][0]['text']
-                
+
         except ImportError:
             raise RuntimeError("llama-cpp-python not installed. Run: pip install llama-cpp-python")
-    
+
     async def pull_model(self, model_name: str) -> bool:
         """Pull a model from Ollama."""
         if self.backend != 'ollama':
             return False
-        
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 'ollama', 'pull', model_name,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT
             )
-            
+
             async for line in proc.stdout:
                 print(f"Pulling {model_name}: {line.decode().strip()}")
-            
+
             await proc.wait()
             return proc.returncode == 0
-            
+
         except Exception as e:
             print(f"Error pulling model: {e}")
             return False
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Check provider health."""
         status = {
@@ -211,7 +209,7 @@ class LocalLLMProvider:
             'healthy': False,
             'error': None
         }
-        
+
         if self.backend == 'ollama':
             try:
                 proc = await asyncio.create_subprocess_exec(
@@ -223,10 +221,10 @@ class LocalLLMProvider:
                     status['healthy'] = True
             except Exception as e:
                 status['error'] = str(e)
-        
+
         elif self.backend == 'gguf':
             status['healthy'] = Path(self.model_path).exists()
             if not status['healthy']:
                 status['error'] = f"Model file not found: {self.model_path}"
-        
+
         return status

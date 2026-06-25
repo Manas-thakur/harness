@@ -5,8 +5,8 @@ Provides zero-cost tools for web search, file I/O, Git operations, and more.
 
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, Callable, Optional
-from harness.file_ops import read_locked, write_atomic
+from typing import Dict, Any, Callable
+from harness.file_ops import write_atomic
 
 
 # Default character limit for tool outputs (VRAM protection)
@@ -33,12 +33,12 @@ class ToolRegistry:
     Registry of all available tools with validation and execution.
     Enforces tool scoping per agent.
     """
-    
+
     def __init__(self):
         """Initialize tool registry with built-in tools."""
         self.tools: Dict[str, Callable] = {}
         self._register_builtin_tools()
-    
+
     def _register_builtin_tools(self):
         """Register all built-in free tools."""
         self.tools["search_web"] = self._search_web
@@ -53,7 +53,7 @@ class ToolRegistry:
         self.tools["read_memory"] = self._read_memory
         self.tools["write_memory"] = self._write_memory
         self.tools["read_pdf"] = self._read_pdf
-    
+
     def execute(
         self, 
         tool_name: str, 
@@ -77,17 +77,17 @@ class ToolRegistry:
                 f"Error: Agent '{agent.name}' does not have permission "
                 f"to use tool '{tool_name}'"
             )
-        
+
         if tool_name not in self.tools:
             return f"Error: Tool '{tool_name}' not found"
-        
+
         try:
             return self.tools[tool_name](tool_input)
         except Exception as e:
             return f"Error executing {tool_name}: {str(e)}"
-    
+
     # === Free Tool Implementations ===
-    
+
     def _search_web(self, input: Dict) -> str:
         """
         DuckDuckGo search (free, no API key).
@@ -96,25 +96,25 @@ class ToolRegistry:
         """
         try:
             from duckduckgo_search import DDGS
-            
+
             query = input.get("query", "")
             max_results = input.get("max_results", 5)
-            
+
             with DDGS() as ddgs:
                 results = list(ddgs.text(query, max_results=max_results))
-            
+
             output = []
             for i, r in enumerate(results, 1):
                 output.append(f"{i}. {r['title']}")
                 output.append(f"   {r['body']}")
                 output.append(f"   URL: {r['href']}\n")
-            
+
             return truncate_output("\n".join(output))
         except ImportError:
             return "Error: duckduckgo-search not installed. Run: pip install duckduckgo-search"
         except Exception as e:
             return f"Search failed: {str(e)}"
-    
+
     def _read_file(self, input: Dict) -> str:
         """
         Read a file from disk.
@@ -122,16 +122,16 @@ class ToolRegistry:
         Input: {"path": str}
         """
         path = Path(input.get("path", ""))
-        
+
         if not path.exists():
             return f"Error: File not found: {path}"
-        
+
         try:
             content = read_file_safe(str(path))
             return truncate_output(content)
         except Exception as e:
             return f"Error reading file: {str(e)}"
-    
+
     def _write_file(self, input: Dict) -> str:
         """
         Write content to a file atomically.
@@ -140,14 +140,14 @@ class ToolRegistry:
         """
         path = Path(input.get("path", ""))
         content = input.get("content", "")
-        
+
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             write_atomic(str(path), content)
             return f"File written: {path}"
         except Exception as e:
             return f"Error writing file: {str(e)}"
-    
+
     def _edit_file(self, input: Dict) -> str:
         """
         Edit a file using search/replace.
@@ -157,22 +157,22 @@ class ToolRegistry:
         path = Path(input.get("path", ""))
         old_string = input.get("old_string", "")
         new_string = input.get("new_string", "")
-        
+
         if not path.exists():
             return f"Error: File not found: {path}"
-        
+
         try:
             content = read_file_safe(str(path))
-            
+
             if old_string not in content:
                 return "Error: old_string not found in file"
-            
+
             new_content = content.replace(old_string, new_string, 1)
             write_atomic(str(path), new_content)
             return f"File edited: {path}"
         except Exception as e:
             return f"Error editing file: {str(e)}"
-    
+
     def _bash(self, input: Dict) -> str:
         """
         Execute a bash command with environment persistence.
@@ -181,12 +181,12 @@ class ToolRegistry:
         """
         command = input.get("command", "")
         timeout = input.get("timeout", 120)
-        
+
         # Source environment file if it exists
         env_file = Path(".agent_env.sh")
         if env_file.exists():
             command = f"source {env_file} && {command}"
-        
+
         try:
             result = subprocess.run(
                 command,
@@ -196,7 +196,7 @@ class ToolRegistry:
                 timeout=timeout,
                 executable="/bin/bash"
             )
-            
+
             output = ""
             if result.stdout:
                 output += result.stdout
@@ -204,13 +204,13 @@ class ToolRegistry:
                 output += f"\nSTDERR: {result.stderr}"
             if result.returncode != 0:
                 output += f"\nExit code: {result.returncode}"
-            
+
             return truncate_output(output or "Command executed successfully (no output)")
         except subprocess.TimeoutExpired:
             return f"Error: Command timed out after {timeout} seconds"
         except Exception as e:
             return f"Error executing command: {str(e)}"
-    
+
     def _git_clone(self, input: Dict) -> str:
         """
         Clone a Git repository.
@@ -219,23 +219,23 @@ class ToolRegistry:
         """
         url = input.get("url", "")
         path = input.get("path", "workspace/repo")
-        
+
         try:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-            
+
             result = subprocess.run(
                 ["git", "clone", url, path],
                 capture_output=True,
                 text=True
             )
-            
+
             if result.returncode != 0:
                 return f"Error: {result.stderr}"
-            
+
             return f"Repository cloned to {path}"
         except Exception as e:
             return f"Error cloning repository: {str(e)}"
-    
+
     def _git_commit(self, input: Dict) -> str:
         """
         Commit changes to Git.
@@ -244,7 +244,7 @@ class ToolRegistry:
         """
         path = input.get("path", ".")
         message = input.get("message", "Update")
-        
+
         try:
             subprocess.run(
                 ["git", "add", "."], 
@@ -257,11 +257,11 @@ class ToolRegistry:
                 capture_output=True,
                 text=True
             )
-            
+
             return result.stdout or result.stderr or "Changes committed"
         except Exception as e:
             return f"Error committing: {str(e)}"
-    
+
     def _explain(self, input: Dict) -> str:
         """
         Placeholder for explanation (handled by Tutor agent's LLM).
@@ -269,7 +269,7 @@ class ToolRegistry:
         Input: {"concept": str}
         """
         return "Explanation generated by Tutor agent via LLM"
-    
+
     def _quiz_me(self, input: Dict) -> str:
         """
         Placeholder for quiz generation (handled by Tutor agent's LLM).
@@ -277,7 +277,7 @@ class ToolRegistry:
         Input: {"topic": str, "num_questions": int}
         """
         return "Quiz generated by Tutor agent via LLM"
-    
+
     def _read_memory(self, input: Dict) -> str:
         """
         Read from memory.md.
@@ -289,7 +289,7 @@ class ToolRegistry:
             return truncate_output(MemoryStore().read_active())
         except Exception as e:
             return f"Error reading memory: {str(e)}"
-    
+
     def _write_memory(self, input: Dict) -> str:
         """
         Write to memory.md.
@@ -304,7 +304,7 @@ class ToolRegistry:
             return "Memory updated"
         except Exception as e:
             return f"Error writing to memory: {str(e)}"
-    
+
     def _read_pdf(self, input: Dict) -> str:
         """
         Read text from a PDF file.
@@ -313,22 +313,22 @@ class ToolRegistry:
         """
         try:
             from pypdf import PdfReader
-            
+
             path = Path(input.get("path", ""))
             if not path.exists():
                 return f"Error: PDF not found: {path}"
-            
+
             reader = PdfReader(str(path))
             text = ""
             for page in reader.pages:
                 text += page.extract_text() + "\n"
-            
+
             return truncate_output(text)
         except ImportError:
             return "Error: pypdf not installed. Run: pip install pypdf"
         except Exception as e:
             return f"Error reading PDF: {str(e)}"
-    
+
     def list_tools(self) -> list:
         """Return list of available tool names."""
         return list(self.tools.keys())

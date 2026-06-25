@@ -11,7 +11,7 @@ class ResearchAgent(BaseAgent):
     Research specialist for web search and document analysis.
     Cannot write code or edit files.
     """
-    
+
     def __init__(self):
         super().__init__(
             name="researcher",
@@ -29,7 +29,7 @@ class ResearchAgent(BaseAgent):
 - If you cannot find the answer, state that explicitly.
 - Use the read_memory tool to check what you already know before searching."""
         )
-    
+
     def run(self, task: str, coordinator) -> str:
         """Execute research task."""
         context = self.get_active_context()
@@ -42,7 +42,7 @@ class TutorAgent(BaseAgent):
     Study companion for explanations and quizzes.
     Cannot search web or write code.
     """
-    
+
     def __init__(self):
         super().__init__(
             name="tutor",
@@ -59,7 +59,7 @@ class TutorAgent(BaseAgent):
 - Do NOT search the web or write code.
 - Use read_memory to recall user preferences and learning style."""
         )
-    
+
     def run(self, task: str, coordinator) -> str:
         """Execute tutoring task."""
         context = self.get_active_context()
@@ -72,7 +72,7 @@ class CoderAgent(BaseAgent):
     Software engineer agent for code operations.
     Cannot explain concepts like a tutor or search web.
     """
-    
+
     def __init__(self):
         super().__init__(
             name="coder",
@@ -92,7 +92,7 @@ class CoderAgent(BaseAgent):
 - Do NOT search the web or explain concepts like a tutor.
 - Be careful with file operations - always verify paths."""
         )
-    
+
     def run(self, task: str, coordinator) -> str:
         """Execute coding task."""
         context = self.get_active_context()
@@ -105,7 +105,7 @@ class DreamerAgent(BaseAgent):
     Batch consolidation agent for memory improvement.
     Only runs during dreaming cycles, not during active sessions.
     """
-    
+
     def __init__(self):
         super().__init__(
             name="dreamer",
@@ -120,7 +120,7 @@ class DreamerAgent(BaseAgent):
 - You do NOT interact with the user directly.
 - Focus on deduplication, verification, and organization."""
         )
-    
+
     def run(self, task: str, coordinator) -> str:
         """Execute dreaming task (should be called by DreamingEngine)."""
         context = self.get_active_context()
@@ -152,5 +152,5 @@ def get_agent(agent_type: str) -> BaseAgent:
     """
     if agent_type not in AGENT_REGISTRY:
         raise ValueError(f"Unknown agent type: {agent_type}")
-    
+
     return AGENT_REGISTRY[agent_type]()

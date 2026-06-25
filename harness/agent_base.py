@@ -12,7 +12,7 @@ class BaseAgent(ABC):
     Abstract base class for all specialist agents.
     Defines the contract for tool scoping, system prompts, and execution.
     """
-    
+
     def __init__(
         self, 
         name: str, 
@@ -31,7 +31,7 @@ class BaseAgent(ABC):
         self.allowed_tools = allowed_tools
         self.system_prompt = system_prompt
         self.thread = AgentThread(agent_name=name)
-    
+
     @abstractmethod
     def run(self, task: str, coordinator) -> str:
         """
@@ -45,7 +45,7 @@ class BaseAgent(ABC):
             Response string
         """
         pass
-    
+
     def can_use_tool(self, tool_name: str) -> bool:
         """
         Check if agent has permission to use a specific tool.
@@ -57,7 +57,7 @@ class BaseAgent(ABC):
             True if tool is in allowed list
         """
         return tool_name in self.allowed_tools
-    
+
     def get_active_context(self) -> list:
         """
         Prepends the system prompt to the thread history for the LLM.
@@ -67,19 +67,19 @@ class BaseAgent(ABC):
         """
         if self.thread.state == ThreadState.IDLE:
             self.thread.state = ThreadState.RUNNING
-        
+
         context = self.thread.get_context()
-        
+
         # Inject system prompt as the first message if not present
         if not context or context[0].get('role') != 'system':
             context.insert(0, {"role": "system", "content": self.system_prompt})
-        
+
         return context
-    
+
     def reset_thread(self):
         """Reset the agent's conversation thread."""
         self.thread = AgentThread(agent_name=self.name)
-    
+
     def get_status(self) -> dict:
         """
         Get current agent status.

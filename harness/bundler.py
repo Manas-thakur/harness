@@ -6,7 +6,6 @@ Bundles memory, config, and startup scripts into a single directory.
 
 import argparse
 import json
-import os
 import shutil
 from pathlib import Path
 from datetime import datetime
@@ -20,23 +19,23 @@ def create_bundle(
     config_file: Optional[Path] = None
 ) -> Path:
     """Create a portable agent bundle."""
-    
+
     bundle_path = output_dir / name
     bundle_path.mkdir(parents=True, exist_ok=True)
-    
+
     print(f"📦 Creating bundle: {bundle_path}")
-    
+
     # Copy memory directory
     if memory_dir is None:
         memory_dir = Path("./memory")
-    
+
     if memory_dir.exists():
         bundle_memory = bundle_path / "memory"
         shutil.copytree(memory_dir, bundle_memory, dirs_exist_ok=True)
         print(f"  ✓ Copied memory ({len(list(bundle_memory.rglob('*.md')))} files)")
     else:
         print("  ⚠ No memory directory found")
-    
+
     # Create manifest
     manifest = {
         "name": name,
@@ -53,12 +52,12 @@ def create_bundle(
             "aiohttp>=3.9.0"
         ]
     }
-    
+
     manifest_path = bundle_path / "manifest.json"
     with open(manifest_path, 'w') as f:
         json.dump(manifest, f, indent=2)
-    print(f"  ✓ Created manifest.json")
-    
+    print("  ✓ Created manifest.json")
+
     # Create start script (Unix)
     start_sh = bundle_path / "start.sh"
     start_sh.write_text(f"""#!/bin/bash
@@ -84,8 +83,8 @@ python3 -m harness.main \\
 
 """)
     start_sh.chmod(0o755)
-    print(f"  ✓ Created start.sh")
-    
+    print("  ✓ Created start.sh")
+
     # Create start script (Windows)
     start_bat = bundle_path / "start.bat"
     start_bat.write_text(f"""@echo off
@@ -107,8 +106,8 @@ python -m harness.main ^
 
 pause
 """)
-    print(f"  ✓ Created start.bat")
-    
+    print("  ✓ Created start.bat")
+
     # Create .agent_env.sh
     env_sh = bundle_path / ".agent_env.sh"
     env_sh.write_text(f"""# Environment variables for {name}
@@ -117,8 +116,8 @@ export AGENT_MEMORY_DIR="{bundle_path}/memory"
 export AGENT_DASHBOARD_ENABLED="true"
 export AGENT_LOCAL_MODE="true"
 """)
-    print(f"  ✓ Created .agent_env.sh")
-    
+    print("  ✓ Created .agent_env.sh")
+
     # Create README
     readme = bundle_path / "README.md"
     readme.write_text(f"""# {name} - Agent Bundle
@@ -151,22 +150,22 @@ Memory files are in the `memory/` directory. Edit `.md` files directly to teach 
 ## Moving This Bundle
 Copy the entire `{name}` folder to another machine. Ensure Ollama is installed, then run `start.sh`.
 """)
-    print(f"  ✓ Created README.md")
-    
+    print("  ✓ Created README.md")
+
     print(f"\n✅ Bundle created successfully at: {bundle_path}")
     print(f"   To use: cd {bundle_path} && ./start.sh")
-    
+
     return bundle_path
 
 
 def list_bundles(base_dir: Path) -> None:
     """List all available bundles."""
     print("\n📦 Available Bundles:\n")
-    
+
     if not base_dir.exists():
         print("  No bundles found.")
         return
-    
+
     bundles = []
     for item in base_dir.iterdir():
         if item.is_dir() and (item / "manifest.json").exists():
@@ -177,11 +176,11 @@ def list_bundles(base_dir: Path) -> None:
                     "created": manifest.get("created_at", "Unknown"),
                     "model": manifest.get("config", {}).get("model", "Unknown")
                 })
-    
+
     if not bundles:
         print("  No bundles found.")
         return
-    
+
     print(f"  {'Name':<30} {'Created':<25} {'Model':<20}")
     print("  " + "-" * 75)
     for b in bundles:
@@ -191,20 +190,20 @@ def list_bundles(base_dir: Path) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Agent Bundle Manager")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
-    
+
     # Create command
     create_parser = subparsers.add_parser("create", help="Create a new bundle")
     create_parser.add_argument("--name", type=str, required=True, help="Bundle name")
     create_parser.add_argument("--output", type=Path, default=Path("./bundles"), help="Output directory")
     create_parser.add_argument("--memory-dir", type=Path, default=None, help="Custom memory directory")
     create_parser.add_argument("--config", type=Path, default=None, help="Custom config file")
-    
+
     # List command
     list_parser = subparsers.add_parser("list", help="List available bundles")
     list_parser.add_argument("--dir", type=Path, default=Path("./bundles"), help="Bundles directory")
-    
+
     args = parser.parse_args()
-    
+
     if args.command == "create":
         create_bundle(
             name=args.name,

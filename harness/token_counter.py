@@ -13,11 +13,11 @@ class TokenCounter:
     which is accurate enough for English text and much faster than
     proper tokenization.
     """
-    
+
     # Default limits for RTX 4060 8GB
     DEFAULT_MAX_TOKENS = 28000  # Leave headroom below 32K
     DEFAULT_MAX_CHARS = 112000  # 28000 * 4
-    
+
     def __init__(
         self, 
         max_tokens: int = DEFAULT_MAX_TOKENS,
@@ -33,7 +33,7 @@ class TokenCounter:
         self.max_tokens = max_tokens
         self.compact_threshold = compact_threshold
         self.max_chars = max_tokens * 4
-    
+
     def count_tokens(self, text: str) -> int:
         """
         Estimate token count for text.
@@ -45,7 +45,7 @@ class TokenCounter:
             Estimated token count
         """
         return len(text) // 4
-    
+
     def count_messages(self, messages: list) -> int:
         """
         Count total tokens in a list of messages.
@@ -63,7 +63,7 @@ class TokenCounter:
             # Add overhead for role markers
             total += 4  # Approximate overhead per message
         return total
-    
+
     def should_compact(self, current_tokens: int) -> bool:
         """
         Check if context should be compacted.
@@ -75,7 +75,7 @@ class TokenCounter:
             True if compaction is recommended
         """
         return current_tokens >= self.compact_threshold
-    
+
     def is_context_full(self, current_tokens: int) -> bool:
         """
         Check if context is approaching the limit.
@@ -87,7 +87,7 @@ class TokenCounter:
             True if context is too full
         """
         return current_tokens >= self.max_tokens
-    
+
     def get_available_tokens(self, current_tokens: int) -> int:
         """
         Get remaining token budget.
@@ -99,7 +99,7 @@ class TokenCounter:
             Available tokens
         """
         return max(0, self.max_tokens - current_tokens)
-    
+
     def truncate_to_fit(
         self, 
         text: str, 
@@ -117,15 +117,15 @@ class TokenCounter:
         """
         available = self.get_available_tokens(reserved_tokens)
         max_chars = available * 4
-        
+
         if len(text) <= max_chars:
             return text
-        
+
         truncation_message = "\n\n... [TRUNCATED] ... Use Grep to search specific parts."
         truncate_at = max_chars - len(truncation_message)
-        
+
         return text[:truncate_at] + truncation_message
-    
+
     def estimate_file_tokens(self, file_path: str) -> int:
         """
         Estimate token count for a file without loading it entirely.
@@ -139,7 +139,7 @@ class TokenCounter:
         import os
         file_size = os.path.getsize(file_path)
         return file_size // 4
-    
+
     def can_load_file(self, file_path: str, current_tokens: int) -> bool:
         """
         Check if a file can be safely loaded into context.

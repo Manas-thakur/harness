@@ -6,7 +6,7 @@ Handles communication with local Ollama server and JSON repair for unreliable mo
 import re
 import json
 import ollama
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any
 
 
 def repair_and_extract_json(text: str) -> dict:
@@ -27,7 +27,7 @@ def repair_and_extract_json(text: str) -> dict:
     start = text.find('{')
     if start == -1:
         raise ValueError("No JSON object found in text")
-    
+
     # Try to find matching } by counting braces
     open_count = 0
     end = -1
@@ -39,7 +39,7 @@ def repair_and_extract_json(text: str) -> dict:
             if open_count == 0:
                 end = i
                 break
-    
+
     # If no matching brace found, try rfind as fallback
     if end == -1:
         end = text.rfind('}')
@@ -50,20 +50,20 @@ def repair_and_extract_json(text: str) -> dict:
             json_str = text[start:end+1]
     else:
         json_str = text[start:end+1]
-    
+
     # 2. Attempt to parse directly
     try:
         return json.loads(json_str)
     except json.JSONDecodeError:
         pass
-    
+
     # 3. Basic repair: remove trailing commas before } or ]
     json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
     try:
         return json.loads(json_str)
     except json.JSONDecodeError:
         pass
-    
+
     # 4. Remove markdown code blocks if present
     json_str = re.sub(r'```json\s*', '', json_str)
     json_str = re.sub(r'```\s*', '', json_str)
@@ -71,7 +71,7 @@ def repair_and_extract_json(text: str) -> dict:
         return json.loads(json_str)
     except json.JSONDecodeError:
         pass
-    
+
     # 5. Try to fix common issues - Add missing closing braces
     open_braces = json_str.count('{')
     close_braces = json_str.count('}')
@@ -81,14 +81,14 @@ def repair_and_extract_json(text: str) -> dict:
             return json.loads(json_str)
         except json.JSONDecodeError:
             pass
-    
+
     # 6. Try removing any remaining whitespace issues
     json_str = json_str.strip()
     try:
         return json.loads(json_str)
     except json.JSONDecodeError:
         pass
-    
+
     raise ValueError(f"Failed to repair JSON: {text[:200]}")
 
 
@@ -97,7 +97,7 @@ class LocalLLMClient:
     Client for interacting with local Ollama LLM instance.
     Optimized for RTX 4060 8GB VRAM with Qwen2.5-7B.
     """
-    
+
     def __init__(
         self, 
         model: str = "qwen2.5:7b",
@@ -115,10 +115,10 @@ class LocalLLMClient:
         self.model = model
         self.host = host
         self.timeout = timeout
-        
+
         # Configure ollama client
         ollama._client._host = host
-    
+
     def generate(
         self, 
         messages: List[Dict[str, str]], 
@@ -146,7 +146,7 @@ class LocalLLMClient:
                 },
                 stream=stream
             )
-            
+
             if stream:
                 content = ""
                 for chunk in response:
@@ -155,12 +155,12 @@ class LocalLLMClient:
                 return content
             else:
                 return response['message']['content']
-                
+
         except ollama.ResponseError as e:
             raise RuntimeError(f"LLM request failed: {str(e)}")
         except Exception as e:
             raise RuntimeError(f"Unexpected error during generation: {str(e)}")
-    
+
     def generate_structured(
         self, 
         messages: List[Dict[str, str]], 
@@ -179,7 +179,7 @@ class LocalLLMClient:
         """
         response_text = self.generate(messages, temperature=temperature)
         return repair_and_extract_json(response_text)
-    
+
     def count_tokens(self, text: str) -> int:
         """
         Estimate token count for text.
@@ -192,7 +192,7 @@ class LocalLLMClient:
             Estimated token count
         """
         return len(text) // 4
-    
+
     def is_available(self) -> bool:
         """
         Check if Ollama server is available and model is loaded.

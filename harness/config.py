@@ -24,7 +24,7 @@ class ModelConfig:
     timeout: int = 30
     max_retries: int = 3
     retry_delay: float = 1.0
-    
+
     def validate(self) -> List[str]:
         """Validate model configuration constraints"""
         errors = []
@@ -51,7 +51,7 @@ class MemoryConfig:
     max_versions: int = 10
     auto_compact: bool = False
     compact_threshold: int = 100  # Compact when entries exceed this
-    
+
     # Shard permissions (POSIX octal)
     shard_permissions: Dict[str, int] = field(default_factory=lambda: {
         "skills": 0o644,
@@ -60,11 +60,11 @@ class MemoryConfig:
         "archive": 0o444,   # Read-only
         "logs": 0o600,      # Private
     })
-    
+
     # Index settings
     auto_index: bool = True
     index_file: str = "_index.md"
-    
+
     def validate(self) -> List[str]:
         """Validate memory configuration"""
         errors = []
@@ -72,7 +72,7 @@ class MemoryConfig:
             errors.append(f"max_versions must be at least 1, got {self.max_versions}")
         if self.compact_threshold < 1:
             errors.append(f"compact_threshold must be positive, got {self.compact_threshold}")
-        
+
         # Validate permissions are valid octal
         for shard, perm in self.shard_permissions.items():
             if not isinstance(perm, int) or perm < 0 or perm > 0o777:
@@ -91,16 +91,16 @@ class AgentConfig:
     sandbox_mode: bool = True
     verbose: bool = False
     log_level: str = "INFO"
-    
+
     # Tool restrictions
     allowed_tools: List[str] = field(default_factory=lambda: ["all"])
     denied_tools: List[str] = field(default_factory=list)
     max_tool_chars: int = 10000
-    
+
     # Safety
     confirm_destructive: bool = True
     dry_run: bool = False
-    
+
     def validate(self) -> List[str]:
         """Validate agent configuration"""
         errors = []
@@ -126,7 +126,7 @@ class ToolConfig:
     allow_filesystem: bool = True
     allowed_paths: List[str] = field(default_factory=lambda: ["./"])
     denied_commands: List[str] = field(default_factory=lambda: ["rm -rf", "sudo", "chmod -R"])
-    
+
     def validate(self) -> List[str]:
         """Validate tool configuration"""
         errors = []
@@ -150,18 +150,18 @@ class FleetConfig:
     leader_election: bool = False
     max_agents: int = 100
     load_balancing: str = "round_robin"  # round_robin, least_loaded, hash
-    
+
     # Communication
     message_queue_path: str = "./messages"
     broadcast_enabled: bool = True
-    
+
     def validate(self) -> List[str]:
         """Validate fleet configuration"""
         errors = []
         if self.heartbeat_interval < 1:
             errors.append(f"heartbeat_interval must be positive, got {self.heartbeat_interval}")
         if self.heartbeat_timeout <= self.heartbeat_interval:
-            errors.append(f"heartbeat_timeout must be greater than heartbeat_interval")
+            errors.append("heartbeat_timeout must be greater than heartbeat_interval")
         if self.max_agents < 1:
             errors.append(f"max_agents must be at least 1, got {self.max_agents}")
         if self.load_balancing not in ["round_robin", "least_loaded", "hash"]:
@@ -177,29 +177,29 @@ class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     tool: ToolConfig = field(default_factory=ToolConfig)
     fleet: FleetConfig = field(default_factory=FleetConfig)
-    
+
     _config_path: Optional[Path] = field(default=None, repr=False)
     _env_prefix: str = field(default="AGENT_", repr=False)
-    
+
     @classmethod
     def from_file(cls, config_path: str, env_prefix: str = "AGENT_") -> "Config":
         """Load configuration from JSON file with environment overrides"""
         path = Path(config_path)
         config_data = {}
-        
+
         if path.exists():
             with open(path, 'r') as f:
                 config_data = json.load(f)
-        
+
         config = cls._from_dict(config_data)
         config._config_path = path
         config._env_prefix = env_prefix
-        
+
         # Apply environment variable overrides
         config._apply_env_overrides()
-        
+
         return config
-    
+
     @classmethod
     def from_env(cls, env_prefix: str = "AGENT_") -> "Config":
         """Load configuration purely from environment variables"""
@@ -207,12 +207,12 @@ class Config:
         config._env_prefix = env_prefix
         config._apply_env_overrides()
         return config
-    
+
     @classmethod
     def _from_dict(cls, data: Dict[str, Any]) -> "Config":
         """Create Config from nested dictionary"""
         config = cls()
-        
+
         if "model" in data:
             config.model = ModelConfig(**{k: v for k, v in data["model"].items() 
                                           if k in ModelConfig.__dataclass_fields__})
@@ -239,32 +239,32 @@ class Config:
         if "fleet" in data:
             config.fleet = FleetConfig(**{k: v for k, v in data["fleet"].items() 
                                           if k in FleetConfig.__dataclass_fields__})
-        
+
         return config
-    
+
     def _apply_env_overrides(self) -> None:
         """Apply environment variable overrides using dot notation"""
         env_vars = os.environ.copy()
-        
+
         for key, value in env_vars.items():
             if not key.startswith(self._env_prefix):
                 continue
-            
+
             # Remove prefix and convert to lowercase dot notation
             config_key = key[len(self._env_prefix):].lower()
-            
+
             # Parse the nested path
             parts = config_key.split("_")
             self._set_nested_value(parts, value)
-    
+
     def _set_nested_value(self, parts: List[str], value: str) -> None:
         """Set a nested configuration value from environment variable"""
         if len(parts) < 2:
             return
-        
+
         section = parts[0]
         field_name = "_".join(parts[1:])
-        
+
         # Map section names to config objects
         section_map = {
             "model": self.model,
@@ -273,21 +273,21 @@ class Config:
             "tool": self.tool,
             "fleet": self.fleet,
         }
-        
+
         if section not in section_map:
             return
-        
+
         config_obj = section_map[section]
-        
+
         if not hasattr(config_obj, field_name):
             return
-        
+
         # Convert value to appropriate type
         current_value = getattr(config_obj, field_name)
         converted_value = self._convert_value(value, type(current_value))
-        
+
         setattr(config_obj, field_name, converted_value)
-    
+
     def _convert_value(self, value: str, target_type: type) -> Any:
         """Convert string value to target type"""
         if target_type == bool:
@@ -313,14 +313,14 @@ class Config:
                 return {}
         else:
             return value
-    
+
     def get(self, path: str, default: Any = None) -> Any:
         """
         Get configuration value using dot notation.
         Example: config.get("model.context_window")
         """
         parts = path.split(".")
-        
+
         # Map first part to config object
         section_map = {
             "model": self.model,
@@ -329,20 +329,20 @@ class Config:
             "tool": self.tool,
             "fleet": self.fleet,
         }
-        
+
         if not parts or parts[0] not in section_map:
             return default
-        
+
         obj = section_map[parts[0]]
-        
+
         # Navigate through remaining parts
         for part in parts[1:]:
             if not hasattr(obj, part):
                 return default
             obj = getattr(obj, part)
-        
+
         return obj
-    
+
     def set(self, path: str, value: Any) -> bool:
         """
         Set configuration value using dot notation.
@@ -350,7 +350,7 @@ class Config:
         Returns True if successful, False if path invalid.
         """
         parts = path.split(".")
-        
+
         section_map = {
             "model": self.model,
             "memory": self.memory,
@@ -358,18 +358,18 @@ class Config:
             "tool": self.tool,
             "fleet": self.fleet,
         }
-        
+
         if len(parts) < 2 or parts[0] not in section_map:
             return False
-        
+
         obj = section_map[parts[0]]
-        
+
         if not hasattr(obj, parts[-1]):
             return False
-        
+
         setattr(obj, parts[-1], value)
         return True
-    
+
     def validate(self) -> List[str]:
         """
         Validate all configuration sections.
@@ -382,11 +382,11 @@ class Config:
         errors.extend(self.tool.validate())
         errors.extend(self.fleet.validate())
         return errors
-    
+
     def is_valid(self) -> bool:
         """Check if configuration is valid"""
         return len(self.validate()) == 0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to nested dictionary"""
         return {
@@ -396,17 +396,17 @@ class Config:
             "tool": asdict(self.tool),
             "fleet": asdict(self.fleet),
         }
-    
+
     def save(self, path: Optional[str] = None) -> None:
         """Save configuration to JSON file"""
         save_path = Path(path) if path else self._config_path
         if not save_path:
             raise ValueError("No path specified for saving configuration")
-        
+
         save_path.parent.mkdir(parents=True, exist_ok=True)
         with open(save_path, 'w') as f:
             json.dump(self.to_dict(), f, indent=2)
-    
+
     def __repr__(self) -> str:
         return f"Config(agent_id={self.agent.agent_id}, model={self.model.model_name})"
 
@@ -432,13 +432,13 @@ def load_config(config_path: Optional[str] = None, env_prefix: str = "AGENT_") -
 if __name__ == "__main__":
     # Example usage and testing
     config = load_config()
-    
+
     print("Configuration loaded:")
     print(f"  Agent ID: {config.agent.agent_id}")
     print(f"  Model: {config.model.model_name}")
     print(f"  Memory Mesh: {config.memory.use_mesh}")
     print(f"  Context Window: {config.get('model.context_window')}")
-    
+
     # Test validation
     errors = config.validate()
     if errors:
