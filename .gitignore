@@ -5,40 +5,12 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Dependencies
-.venv/
-venv/
-env/
-.env
-.env.local
-.env.*
+# Test files
+.pytest_cache/
+
+# Lock files
+*.lock
 
 # Logs
 *.log
-
-# Temporary files
-*.tmp
-*.swp
-*~
-
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Coverage reports
-.coverage
-htmlcov/
-coverage/
-
-# IDE
-.vscode/
-.idea/
-*.sublime-project
-*.sublime-workspace
-
-# Build artifacts
-build/
-dist/
-*.egg-info/
-target/
 ```
