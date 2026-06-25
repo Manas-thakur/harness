@@ -181,6 +181,10 @@ class AgentTUI:
             self._cmd_model(args)
         elif cmd == "dream":
             self._cmd_dream(args)
+        elif cmd == "remember":
+            self._cmd_remember(args)
+        elif cmd == "recall":
+            self._cmd_recall(args)
         elif cmd in ("clear", "new"):
             self._cmd_clear()
         else:
@@ -198,7 +202,9 @@ class AgentTUI:
             ("/tools", "List available tools"),
             ("/status", "Show system status"),
             ("/model [name]", "Show or switch the active model"),
-            ("/dream [n]", "Consolidate the last n sessions into memory"),
+            ("/dream [n] [--activate]", "Consolidate recent sessions into memory"),
+            ("/remember <fact>", "Store a fact in long-term memory"),
+            ("/recall <query>", "Search long-term memory"),
             ("/clear", "Reset the conversation and clear the screen"),
             ("/quit", "Exit"),
         ]
@@ -267,18 +273,51 @@ class AgentTUI:
         self.console.print(f"[green]✓ switched to[/green] [cyan]{new_model}[/cyan] [dim]({mode})[/dim]")
 
     def _cmd_dream(self, args):
-        sessions = int(args[0]) if args and args[0].isdigit() else 3
+        activate = "--activate" in args
+        nums = [a for a in args if a.isdigit()]
+        sessions = int(nums[0]) if nums else 3
+        # Persist the current session so dreaming has fresh material.
+        try:
+            if self.coordinator.session_transcript:
+                self.coordinator.save_session_transcript()
+        except Exception:
+            pass
         self.console.print(f"[magenta]🌙 dreaming over last {sessions} session(s)…[/magenta]")
         try:
             from harness.dreaming import DreamingEngine
-            result = DreamingEngine().run_dreaming_cycle(max_sessions=sessions)
+            engine = DreamingEngine()
+            result = engine.run_dreaming_cycle(max_sessions=sessions)
             if result:
                 self.console.print(f"[green]✓ dream saved:[/green] {result}")
-                self.console.print("[dim]Review it, then `agent activate <path>` to apply.[/dim]")
+                if activate:
+                    if engine.activate_dream(result):
+                        self.console.print("[green]✓ memory activated (snapshot saved first).[/green]")
+                    else:
+                        self.console.print("[red]✗ activation failed.[/red]")
+                else:
+                    self.console.print("[dim]Review it, then `/dream --activate` or `agent activate <path>` to apply.[/dim]")
             else:
                 self.console.print("[yellow]No sessions found to consolidate yet.[/yellow]")
         except Exception as e:
             self.console.print(f"[red]dreaming failed: {e}[/red]")
+
+    def _cmd_remember(self, args):
+        fact = " ".join(args).strip()
+        if not fact:
+            self.console.print("[yellow]usage: /remember <fact>[/yellow]")
+            return
+        result = self.coordinator.tools.execute("remember", {"fact": fact})
+        self.console.print(f"[green]🧠 {result}[/green]")
+
+    def _cmd_recall(self, args):
+        query = " ".join(args).strip()
+        if not query:
+            self.console.print("[yellow]usage: /recall <query>[/yellow]")
+            return
+        result = self.coordinator.tools.execute("recall", {"query": query})
+        self.console.print(Panel(result or "_nothing found_",
+                                 title="[bold]🧠 recall[/bold]",
+                                 border_style="green", box=box.ROUNDED))
 
     def _cmd_clear(self):
         for agent in self.coordinator.agents.values():
