@@ -1,5 +1,11 @@
 """Phi coding-agent application package."""
 
+from phi_coding.codebase_tools import (
+    create_codebase_tools,
+    create_glob_tool_definition,
+    create_grep_tool_definition,
+    create_ls_tool_definition,
+)
 from phi_coding.commands import (
     CommandRegistry,
     CommandResult,
@@ -194,7 +200,11 @@ __all__ = [
     "expand_prompt_template_command",
     "create_bash_tool",
     "create_bash_tool_definition",
+    "create_codebase_tools",
     "create_coding_tools",
+    "create_glob_tool_definition",
+    "create_grep_tool_definition",
+    "create_ls_tool_definition",
     "create_edit_tool",
     "create_edit_tool_definition",
     "create_default_command_registry",

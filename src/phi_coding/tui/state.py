@@ -47,7 +47,7 @@ class TuiState:
     running: bool = False
     error: str | None = None
     show_tool_results: bool = False
-    show_thinking: bool = False
+    show_thinking: bool = True
     queued_steering: tuple[str, ...] = ()
     queued_follow_up: tuple[str, ...] = ()
     skills: tuple[Skill, ...] = ()

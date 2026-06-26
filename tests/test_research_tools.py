@@ -178,3 +178,81 @@ async def test_read_pdf_missing_file() -> None:
 
     with pytest.raises(ToolInputError):
         await create_read_pdf_tool_definition().executor({"path": "/no/such.pdf"})
+
+
+# --- cancellation -----------------------------------------------------------
+
+
+class _AlreadyCancelledToken:
+    def is_cancelled(self) -> bool:
+        return True
+
+
+@pytest.mark.anyio
+async def test_fetch_url_honors_already_cancelled_signal(monkeypatch) -> None:
+    calls = {"get": 0}
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url):  # pragma: no cover - must not be reached
+            calls["get"] += 1
+            raise AssertionError("network call should not start when already cancelled")
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+
+    result = await create_fetch_url_tool_definition().executor(
+        {"url": "example.com"}, signal=_AlreadyCancelledToken()
+    )
+    assert not result.ok
+    assert "cancelled" in result.content.lower()
+    assert calls["get"] == 0
+
+
+@pytest.mark.anyio
+async def test_fetch_url_cancels_an_in_flight_request(monkeypatch) -> None:
+    import anyio
+
+    cancelled = _MutableToken()
+
+    class SlowClient:
+        def __init__(self, **kwargs) -> None:
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def get(self, url):
+            cancelled.cancel()
+            await anyio.sleep(5)  # would hang without cancellation
+            raise AssertionError("request should have been cancelled")
+
+    monkeypatch.setattr(httpx, "AsyncClient", SlowClient)
+
+    with anyio.fail_after(2):
+        result = await create_fetch_url_tool_definition().executor(
+            {"url": "example.com"}, signal=cancelled
+        )
+    assert not result.ok
+    assert "cancelled" in result.content.lower()
+
+
+class _MutableToken:
+    def __init__(self) -> None:
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def is_cancelled(self) -> bool:
+        return self._cancelled

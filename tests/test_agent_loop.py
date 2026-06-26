@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Mapping
 
+import anyio
 import pytest
 
 from phi_agent import (
@@ -485,6 +486,127 @@ async def test_agent_loop_records_unknown_tool_as_failed_tool_result() -> None:
         ok=False,
         error="Unknown tool: missing",
     )
+
+
+@pytest.mark.anyio
+async def test_agent_loop_runs_read_only_tool_calls_concurrently() -> None:
+    started = 0
+    max_concurrent = 0
+
+    async def executor(
+        arguments: Mapping[str, JSONValue],
+        signal: object | None = None,
+    ) -> AgentToolResult:
+        del signal
+        nonlocal started, max_concurrent
+        started += 1
+        max_concurrent = max(max_concurrent, started)
+        await anyio.sleep(0.02)
+        started -= 1
+        return AgentToolResult(
+            tool_call_id="", name="fetch", ok=True, content=f"got {arguments['url']}"
+        )
+
+    tool = AgentTool(
+        name="fetch",
+        description="Fetch a URL.",
+        input_schema={"type": "object"},
+        executor=executor,
+        read_only=True,
+    )
+    tool_calls = [
+        ToolCall(id="call-1", name="fetch", arguments={"url": "a"}),
+        ToolCall(id="call-2", name="fetch", arguments={"url": "b"}),
+        ToolCall(id="call-3", name="fetch", arguments={"url": "c"}),
+    ]
+    assistant = AssistantMessage(content="Fetching.", tool_calls=tool_calls)
+    final = AssistantMessage(content="Done.")
+    messages = [UserMessage(content="Fetch three URLs")]
+    provider = FakeProvider(
+        [
+            [
+                ProviderResponseStartEvent(model="fake"),
+                ProviderResponseEndEvent(message=assistant, finish_reason="tool_calls"),
+            ],
+            [
+                ProviderResponseStartEvent(model="fake"),
+                ProviderResponseEndEvent(message=final, finish_reason="stop"),
+            ],
+        ]
+    )
+
+    events = await _collect(
+        run_agent_loop(
+            provider=provider,
+            model="fake",
+            system="You are Phi.",
+            messages=messages,
+            tools=[tool],
+        )
+    )
+
+    assert max_concurrent == 3
+    end_events = [event for event in events if isinstance(event, ToolExecutionEndEvent)]
+    assert [event.result.tool_call_id for event in end_events] == ["call-1", "call-2", "call-3"]
+    result_ids = [
+        message.tool_call_id for message in messages if isinstance(message, ToolResultMessage)
+    ]
+    assert result_ids == ["call-1", "call-2", "call-3"]
+
+
+@pytest.mark.anyio
+async def test_agent_loop_keeps_mutating_tool_calls_sequential() -> None:
+    started = 0
+    max_concurrent = 0
+
+    async def executor(
+        arguments: Mapping[str, JSONValue],
+        signal: object | None = None,
+    ) -> AgentToolResult:
+        del arguments, signal
+        nonlocal started, max_concurrent
+        started += 1
+        max_concurrent = max(max_concurrent, started)
+        await anyio.sleep(0.02)
+        started -= 1
+        return AgentToolResult(tool_call_id="", name="write", ok=True, content="wrote")
+
+    tool = AgentTool(
+        name="write",
+        description="Write a file.",
+        input_schema={"type": "object"},
+        executor=executor,
+    )
+    tool_calls = [
+        ToolCall(id="call-1", name="write", arguments={"path": "a"}),
+        ToolCall(id="call-2", name="write", arguments={"path": "b"}),
+    ]
+    assistant = AssistantMessage(content="Writing.", tool_calls=tool_calls)
+    final = AssistantMessage(content="Done.")
+    provider = FakeProvider(
+        [
+            [
+                ProviderResponseStartEvent(model="fake"),
+                ProviderResponseEndEvent(message=assistant, finish_reason="tool_calls"),
+            ],
+            [
+                ProviderResponseStartEvent(model="fake"),
+                ProviderResponseEndEvent(message=final, finish_reason="stop"),
+            ],
+        ]
+    )
+
+    await _collect(
+        run_agent_loop(
+            provider=provider,
+            model="fake",
+            system="You are Phi.",
+            messages=[UserMessage(content="Write two files")],
+            tools=[tool],
+        )
+    )
+
+    assert max_concurrent == 1
 
 
 @pytest.mark.anyio

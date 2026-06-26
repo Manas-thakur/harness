@@ -11,7 +11,7 @@ These keep menace's research capability on phi's typed, async tool protocol.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 
 import anyio
 
@@ -25,10 +25,55 @@ FETCH_TIMEOUT_SECONDS = 20.0
 _USER_AGENT = "Mozilla/5.0 (compatible; menace/1.0)"
 
 
+_CANCEL_POLL_SECONDS = 0.05
+
+
 def _truncate(text: str, limit: int = MAX_RESEARCH_OUTPUT_CHARS) -> str:
     if len(text) > limit:
         return text[:limit] + "\n\n… [truncated]"
     return text
+
+
+def _cancelled_result(name: str) -> AgentToolResult:
+    message = "Tool call cancelled."
+    return AgentToolResult(tool_call_id="", name=name, ok=False, content=message, error=message)
+
+
+async def _run_with_cancellation(
+    signal: ToolCancellationToken | None,
+    name: str,
+    work: Callable[[], Awaitable[AgentToolResult]],
+) -> AgentToolResult:
+    """Run `work()`, returning a cancelled result if `signal` trips first.
+
+    A watcher task polls the cancellation token and cancels the shared scope so a
+    long network fetch or blocking thread call does not keep running after the
+    user interrupts. ``work`` is expected to handle its own errors and return an
+    ``AgentToolResult`` rather than raising.
+    """
+    if signal is None:
+        return await work()
+    if signal.is_cancelled():
+        return _cancelled_result(name)
+
+    outcome: AgentToolResult | None = None
+
+    async with anyio.create_task_group() as task_group:
+
+        async def runner() -> None:
+            nonlocal outcome
+            outcome = await work()
+            task_group.cancel_scope.cancel()
+
+        async def watcher() -> None:
+            while not signal.is_cancelled():
+                await anyio.sleep(_CANCEL_POLL_SECONDS)
+            task_group.cancel_scope.cancel()
+
+        task_group.start_soon(runner)
+        task_group.start_soon(watcher)
+
+    return outcome if outcome is not None else _cancelled_result(name)
 
 
 def _str_arg(arguments: Mapping[str, JSONValue], key: str) -> str:
@@ -56,7 +101,7 @@ def _run_search(query: str, max_results: int) -> list[dict[str, str]] | None:
         from ddgs import DDGS
     except ImportError:
         try:
-            from duckduckgo_search import DDGS  # type: ignore[no-redef]
+            from duckduckgo_search import DDGS  # type: ignore[no-redef, import-not-found]
         except ImportError:
             return None
     with DDGS() as ddgs:
@@ -72,55 +117,59 @@ def create_search_web_tool_definition() -> ToolDefinition:
         arguments: Mapping[str, JSONValue],
         signal: ToolCancellationToken | None = None,
     ) -> AgentToolResult:
-        del signal
         query = _str_arg(arguments, "query")
         raw_max = arguments.get("max_results")
         max_results = int(raw_max) if isinstance(raw_max, (int, float)) else DEFAULT_SEARCH_RESULTS
         max_results = max(1, min(max_results, 20))
 
-        try:
-            results = await anyio.to_thread.run_sync(_run_search, query, max_results)
-        except Exception as exc:  # noqa: BLE001 - surface backend/network errors
-            return AgentToolResult(
-                tool_call_id="",
-                name="search_web",
-                ok=False,
-                content=f"Search failed (network or backend error): {exc}",
-                error=str(exc),
-            )
+        async def work() -> AgentToolResult:
+            try:
+                results = await anyio.to_thread.run_sync(
+                    _run_search, query, max_results, abandon_on_cancel=True
+                )
+            except Exception as exc:  # noqa: BLE001 - surface backend/network errors
+                return AgentToolResult(
+                    tool_call_id="",
+                    name="search_web",
+                    ok=False,
+                    content=f"Search failed (network or backend error): {exc}",
+                    error=str(exc),
+                )
 
-        if results is None:
-            msg = "Web search backend not installed. Run: pip install ddgs"
-            return AgentToolResult(
-                tool_call_id="", name="search_web", ok=False, content=msg, error=msg
-            )
-        if not results:
+            if results is None:
+                msg = "Web search backend not installed. Run: pip install ddgs"
+                return AgentToolResult(
+                    tool_call_id="", name="search_web", ok=False, content=msg, error=msg
+                )
+            if not results:
+                return AgentToolResult(
+                    tool_call_id="",
+                    name="search_web",
+                    ok=True,
+                    content=(
+                        f"No results found for: {query}. Try a simpler or differently "
+                        "worded query; do not guess the answer."
+                    ),
+                )
+
+            lines = [
+                f"Search results for: {query}",
+                "(Use fetch_url on a result's URL to read the full page before stating facts.)\n",
+            ]
+            for index, item in enumerate(results, 1):
+                title = item.get("title", "")
+                body = item.get("body") or item.get("description", "")
+                url = item.get("href") or item.get("url", "")
+                lines.extend([f"{index}. {title}", f"   {body}", f"   URL: {url}\n"])
             return AgentToolResult(
                 tool_call_id="",
                 name="search_web",
                 ok=True,
-                content=(
-                    f"No results found for: {query}. Try a simpler or differently "
-                    "worded query; do not guess the answer."
-                ),
+                content=_truncate("\n".join(lines)),
+                data={"count": len(results)},
             )
 
-        lines = [
-            f"Search results for: {query}",
-            "(Use fetch_url on a result's URL to read the full page before stating facts.)\n",
-        ]
-        for index, item in enumerate(results, 1):
-            title = item.get("title", "")
-            body = item.get("body") or item.get("description", "")
-            url = item.get("href") or item.get("url", "")
-            lines.extend([f"{index}. {title}", f"   {body}", f"   URL: {url}\n"])
-        return AgentToolResult(
-            tool_call_id="",
-            name="search_web",
-            ok=True,
-            content=_truncate("\n".join(lines)),
-            data={"count": len(results)},
-        )
+        return await _run_with_cancellation(signal, "search_web", work)
 
     return ToolDefinition(
         name="search_web",
@@ -143,6 +192,7 @@ def create_search_web_tool_definition() -> ToolDefinition:
             "required": ["query"],
         },
         executor=execute,
+        read_only=True,
     )
 
 
@@ -152,7 +202,7 @@ def create_search_web_tool_definition() -> ToolDefinition:
 def _html_to_text(html: str) -> str:
     """Extract readable text from HTML, dropping script/style/markup."""
     try:
-        from lxml import html as lxml_html
+        from lxml import html as lxml_html  # type: ignore[import-untyped]
 
         doc = lxml_html.fromstring(html)
         for bad in doc.xpath("//script | //style | //noscript"):
@@ -173,45 +223,49 @@ def create_fetch_url_tool_definition() -> ToolDefinition:
         arguments: Mapping[str, JSONValue],
         signal: ToolCancellationToken | None = None,
     ) -> AgentToolResult:
-        del signal
         url = _str_arg(arguments, "url")
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
 
-        import httpx
+        async def work() -> AgentToolResult:
+            import httpx
 
-        try:
-            async with httpx.AsyncClient(
-                follow_redirects=True,
-                timeout=FETCH_TIMEOUT_SECONDS,
-                headers={"User-Agent": _USER_AGENT},
-            ) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-        except Exception as exc:  # noqa: BLE001 - surface network/HTTP errors
-            return AgentToolResult(
-                tool_call_id="",
-                name="fetch_url",
-                ok=False,
-                content=f"Error fetching {url}: {exc}",
-                error=str(exc),
+            try:
+                async with httpx.AsyncClient(
+                    follow_redirects=True,
+                    timeout=FETCH_TIMEOUT_SECONDS,
+                    headers={"User-Agent": _USER_AGENT},
+                ) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+            except Exception as exc:  # noqa: BLE001 - surface network/HTTP errors
+                return AgentToolResult(
+                    tool_call_id="",
+                    name="fetch_url",
+                    ok=False,
+                    content=f"Error fetching {url}: {exc}",
+                    error=str(exc),
+                )
+
+            text = await anyio.to_thread.run_sync(
+                _html_to_text, response.text, abandon_on_cancel=True
             )
-
-        text = await anyio.to_thread.run_sync(_html_to_text, response.text)
-        if not text.strip():
+            if not text.strip():
+                return AgentToolResult(
+                    tool_call_id="",
+                    name="fetch_url",
+                    ok=True,
+                    content=f"Fetched {url} but found no readable text.",
+                )
             return AgentToolResult(
                 tool_call_id="",
                 name="fetch_url",
                 ok=True,
-                content=f"Fetched {url} but found no readable text.",
+                content=_truncate(f"Content of {url}:\n\n{text}"),
+                data={"url": url},
             )
-        return AgentToolResult(
-            tool_call_id="",
-            name="fetch_url",
-            ok=True,
-            content=_truncate(f"Content of {url}:\n\n{text}"),
-            data={"url": url},
-        )
+
+        return await _run_with_cancellation(signal, "fetch_url", work)
 
     return ToolDefinition(
         name="fetch_url",
@@ -231,6 +285,7 @@ def create_fetch_url_tool_definition() -> ToolDefinition:
             "required": ["url"],
         },
         executor=execute,
+        read_only=True,
     )
 
 
@@ -251,37 +306,44 @@ def create_read_pdf_tool_definition() -> ToolDefinition:
         arguments: Mapping[str, JSONValue],
         signal: ToolCancellationToken | None = None,
     ) -> AgentToolResult:
-        del signal
         path = _str_arg(arguments, "path")
         from pathlib import Path
 
         if not Path(path).exists():
             raise ToolInputError(f"PDF not found: {path}")
-        try:
-            text = await anyio.to_thread.run_sync(_read_pdf, path)
-        except ImportError:
-            msg = "pypdf not installed. Run: pip install pypdf"
-            return AgentToolResult(
-                tool_call_id="", name="read_pdf", ok=False, content=msg, error=msg
-            )
-        except Exception as exc:  # noqa: BLE001 - surface parse errors
-            return AgentToolResult(
-                tool_call_id="",
-                name="read_pdf",
-                ok=False,
-                content=f"Error reading PDF: {exc}",
-                error=str(exc),
-            )
-        if not text.strip():
+
+        async def work() -> AgentToolResult:
+            try:
+                text = await anyio.to_thread.run_sync(_read_pdf, path, abandon_on_cancel=True)
+            except ImportError:
+                msg = "pypdf not installed. Run: pip install pypdf"
+                return AgentToolResult(
+                    tool_call_id="", name="read_pdf", ok=False, content=msg, error=msg
+                )
+            except Exception as exc:  # noqa: BLE001 - surface parse errors
+                return AgentToolResult(
+                    tool_call_id="",
+                    name="read_pdf",
+                    ok=False,
+                    content=f"Error reading PDF: {exc}",
+                    error=str(exc),
+                )
+            if not text.strip():
+                return AgentToolResult(
+                    tool_call_id="",
+                    name="read_pdf",
+                    ok=True,
+                    content=f"Read {path} but found no extractable text.",
+                )
             return AgentToolResult(
                 tool_call_id="",
                 name="read_pdf",
                 ok=True,
-                content=f"Read {path} but found no extractable text.",
+                content=_truncate(text),
+                data={"path": path},
             )
-        return AgentToolResult(
-            tool_call_id="", name="read_pdf", ok=True, content=_truncate(text), data={"path": path}
-        )
+
+        return await _run_with_cancellation(signal, "read_pdf", work)
 
     return ToolDefinition(
         name="read_pdf",
@@ -294,4 +356,5 @@ def create_read_pdf_tool_definition() -> ToolDefinition:
             "required": ["path"],
         },
         executor=execute,
+        read_only=True,
     )

@@ -5,6 +5,9 @@ from pathlib import Path
 
 from phi_coding.paths import PhiPaths
 
+BUILTIN_SKILLS_DIR = Path(__file__).resolve().parent / "builtin_skills"
+"""Directory of packaged, always-available skills that ship with menace."""
+
 
 class ResourceError(ValueError):
     """Raised when Phi resources are invalid or cannot be expanded."""
@@ -44,6 +47,7 @@ class PhiResourcePaths:
     cwd: Path | None = None
     agents_root: Path | None = field(default_factory=lambda: Path.home() / ".agents")
     paths: PhiPaths | None = None
+    include_builtin_skills: bool = False
 
     @property
     def skills_dir(self) -> Path:
@@ -57,9 +61,15 @@ class PhiResourcePaths:
 
     @property
     def skills_dirs(self) -> tuple[Path, ...]:
-        """Return skill directories in increasing precedence order."""
+        """Return skill directories in increasing precedence order.
+
+        The packaged built-in skills come first (lowest precedence) so user and
+        project skills with the same name always override them.
+        """
         paths = self._paths()
         dirs = [self.skills_dir]
+        if self.include_builtin_skills:
+            dirs.insert(0, BUILTIN_SKILLS_DIR)
         if self.agents_root is not None:
             dirs.extend([self.agents_root / "skills", self.agents_root])
         if self.cwd is not None:
@@ -109,9 +119,14 @@ def resource_paths_with_cwd(
     paths: PhiResourcePaths | None,
     cwd: Path,
 ) -> PhiResourcePaths:
-    """Return resource paths with a cwd available for project-local discovery."""
+    """Return resource paths with a cwd available for project-local discovery.
+
+    When no explicit resource paths are supplied (the normal application path),
+    the packaged built-in skills are included; callers that pass their own
+    `PhiResourcePaths` control this through ``include_builtin_skills``.
+    """
     if paths is None:
-        return PhiResourcePaths(cwd=cwd)
+        return PhiResourcePaths(cwd=cwd, include_builtin_skills=True)
     if paths.cwd is not None:
         return paths
     return PhiResourcePaths(
@@ -119,6 +134,7 @@ def resource_paths_with_cwd(
         cwd=cwd,
         agents_root=paths.agents_root,
         paths=paths.paths,
+        include_builtin_skills=paths.include_builtin_skills,
     )
 
 

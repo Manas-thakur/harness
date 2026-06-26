@@ -178,6 +178,9 @@ async def test_load_empty_session_defers_transcript_file(tmp_path: Path) -> None
         "write",
         "edit",
         "bash",
+        "glob",
+        "grep",
+        "ls",
         "search_web",
         "fetch_url",
         "read_pdf",
@@ -185,6 +188,14 @@ async def test_load_empty_session_defers_transcript_file(tmp_path: Path) -> None
         "remember",
         "recall",
     ]
+
+
+@pytest.mark.anyio
+async def test_session_loads_builtin_skills_by_default(tmp_path: Path) -> None:
+    storage = JsonlSessionStorage(tmp_path / "session.jsonl")
+    session = await CodingSession.load(_config(tmp_path, FakeProvider([]), storage))
+    names = {skill.name for skill in session.skills}
+    assert {"deep-research", "debugging", "code-review"} <= names
 
 
 @pytest.mark.anyio

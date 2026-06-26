@@ -19,7 +19,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 from textual.containers import Horizontal, VerticalScroll
-from textual.content import Style as TextualStyle
+from textual.content import Style as TextualStyle  # type: ignore[attr-defined]
 from textual.events import Resize
 from textual.geometry import Offset
 from textual.selection import Selection
@@ -238,6 +238,7 @@ class TranscriptMessageWidget(Horizontal):
         yield body
 
     def _body_widget(self) -> Static | ThemedMarkdownWidget:
+        body: Static | ThemedMarkdownWidget
         if _use_plain_transcript_body(self.item):
             body = Static(
                 _transcript_plain_body_text(
@@ -710,6 +711,7 @@ def render_session_sidebar(
     metadata.add_row("tools", str(len(session.tools)))
     metadata.add_row("skills", str(len(session.skills)))
 
+    sessions = _sidebar_sessions(session, theme=theme)
     tools = _bullet_list([tool.name for tool in session.tools], empty="No tools", theme=theme)
     skills = _bullet_list(
         [skill.name for skill in session.skills],
@@ -732,6 +734,8 @@ def render_session_sidebar(
         Padding(Align.center(equation), (0, 0, 1, 0)),
         _sidebar_section("session", metadata, theme=theme),
         _sidebar_separator(theme=theme),
+        _sidebar_section("sessions", sessions, theme=theme),
+        _sidebar_separator(theme=theme),
         _sidebar_section("context", context, theme=theme),
         _sidebar_separator(theme=theme),
         _sidebar_section("tools", tools, theme=theme),
@@ -740,6 +744,56 @@ def render_session_sidebar(
         _sidebar_separator(theme=theme),
         _sidebar_section("prompts", prompts, theme=theme),
     )
+
+
+SIDEBAR_SESSION_LIMIT = 6
+_SIDEBAR_SESSION_TITLE_WIDTH = 22
+
+
+def _sidebar_sessions(
+    session: SessionSummarySource,
+    *,
+    theme: TuiTheme,
+    limit: int = SIDEBAR_SESSION_LIMIT,
+) -> RenderableType:
+    """Render recent sessions for this project, newest first, active marked.
+
+    Each non-active title is a click target wired to the app's
+    ``switch_session`` action, so the left panel doubles as a session switcher.
+    Switching is also available from the session picker and ``/resume``.
+    """
+    manager = getattr(session, "session_manager", None)
+    if manager is None:
+        return Text("Session history unavailable", style=theme.completion_description)
+    try:
+        records = list(manager.list_sessions(session.cwd))
+    except Exception:  # noqa: BLE001 - history is best-effort chrome, never fatal
+        records = []
+    if not records:
+        return Text("No saved sessions yet", style=theme.completion_description)
+
+    active_id = getattr(session, "session_id", None)
+    table = Table.grid(padding=(0, 1))
+    table.add_column(style=theme.accent, no_wrap=True)
+    table.add_column(style=theme.prompt_text)
+    for record in records[:limit]:
+        is_active = active_id is not None and record.id == active_id
+        title = _clip_text(record.title or "Untitled session", _SIDEBAR_SESSION_TITLE_WIDTH)
+        label = Text(title)
+        if is_active:
+            label.stylize(f"bold {theme.accent}")
+        else:
+            label.stylize(theme.markdown_link)
+            label.stylize(Style(meta={"@click": f"switch_session('{record.id}')"}))
+        table.add_row("›" if is_active else " ", label)
+    return table
+
+
+def _clip_text(text: str, width: int) -> str:
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= width:
+        return collapsed
+    return collapsed[: max(1, width - 1)].rstrip() + "…"
 
 
 def _sidebar_section(
@@ -1017,7 +1071,7 @@ class ThemedCodeBlock(CodeBlock):
 class LeftAlignedMarkdownHeading(Heading):
     """Rich Markdown heading that keeps all heading levels left-aligned."""
 
-    LEVEL_ALIGN: ClassVar[dict[str, str]] = {
+    LEVEL_ALIGN: ClassVar[dict[str, str]] = {  # type: ignore[assignment]
         "h1": "left",
         "h2": "left",
         "h3": "left",

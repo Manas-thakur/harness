@@ -2,6 +2,8 @@
 
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 
+import anyio
+
 from phi_agent.events import (
     AgentEndEvent,
     AgentEvent,
@@ -201,7 +203,9 @@ async def _execute_tool_calls(
     messages: list[AgentMessage],
     signal: CancellationToken | None,
 ) -> AsyncIterator[AgentEvent]:
-    for index, tool_call in enumerate(tool_calls):
+    index = 0
+    total = len(tool_calls)
+    while index < total:
         if signal is not None and signal.is_cancelled():
             for cancelled_tool_call in tool_calls[index:]:
                 result = _cancelled_tool_result(cancelled_tool_call)
@@ -210,16 +214,70 @@ async def _execute_tool_calls(
             yield ErrorEvent(message="Agent run cancelled", recoverable=True)
             return
 
-        yield ToolExecutionStartEvent(tool_call=tool_call)
+        batch_end = index
+        while batch_end < total and _is_read_only(tool_calls[batch_end], tool_by_name):
+            batch_end += 1
 
+        if batch_end - index >= 2:
+            # Run a contiguous run of read-only tool calls concurrently while
+            # preserving transcript order: emit all starts, gather, emit ends.
+            batch = tool_calls[index:batch_end]
+            for tool_call in batch:
+                yield ToolExecutionStartEvent(tool_call=tool_call)
+            results = await _execute_parallel(batch, tool_by_name, signal)
+            for result in results:
+                messages.append(_tool_result_message(result))
+                yield ToolExecutionEndEvent(result=result)
+            index = batch_end
+            continue
+
+        tool_call = tool_calls[index]
+        yield ToolExecutionStartEvent(tool_call=tool_call)
         tool = tool_by_name.get(tool_call.name)
         if tool is None:
             result = _unknown_tool_result(tool_call)
         else:
             result = await _execute_tool(tool, tool_call, signal)
-
         messages.append(_tool_result_message(result))
         yield ToolExecutionEndEvent(result=result)
+        index += 1
+
+
+def _is_read_only(tool_call: ToolCall, tool_by_name: Mapping[str, AgentTool]) -> bool:
+    tool = tool_by_name.get(tool_call.name)
+    return tool is not None and tool.read_only
+
+
+async def _execute_parallel(
+    batch: list[ToolCall],
+    tool_by_name: Mapping[str, AgentTool],
+    signal: CancellationToken | None,
+) -> list[AgentToolResult]:
+    """Execute a batch of read-only tool calls concurrently, preserving order.
+
+    `_execute_tool` is an isolation boundary that converts any exception into a
+    failed `AgentToolResult`, so no task raises and the task group always
+    completes normally.
+    """
+    results: list[AgentToolResult | None] = [None] * len(batch)
+
+    async def run(position: int, tool_call: ToolCall) -> None:
+        tool = tool_by_name.get(tool_call.name)
+        if tool is None:
+            results[position] = _unknown_tool_result(tool_call)
+        else:
+            results[position] = await _execute_tool(tool, tool_call, signal)
+
+    async with anyio.create_task_group() as task_group:
+        for position, tool_call in enumerate(batch):
+            task_group.start_soon(run, position, tool_call)
+
+    # Guarantee exactly one result per call so no tool_call is left unanswered,
+    # even in the unlikely event a task was interrupted before storing its slot.
+    return [
+        result if result is not None else _cancelled_tool_result(tool_call)
+        for tool_call, result in zip(batch, results, strict=True)
+    ]
 
 
 async def _execute_tool(

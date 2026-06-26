@@ -64,10 +64,13 @@ Do not render from provider-specific chunks. The provider layer translates model
 output into Phi events so every frontend can share the same behavior.
 
 `ThinkingDeltaEvent` carries optional streamed reasoning text from providers
-that expose it. Keep it separate from assistant message text, hide it by
-default, and let the user opt in from the frontend. The built-in Textual app
-uses `Ctrl+T` for this toggle and renders thinking content with a distinct
-transcript style.
+that expose it. Keep it separate from assistant message text and let the user
+toggle it from the frontend. The built-in Textual app shows thinking by default
+so reasoning streams between messages, uses `Ctrl+T` to toggle it, and renders
+thinking content with a distinct transcript style. Reasoning models served over
+the OpenAI-compatible provider that wrap their chain of thought in inline
+`<think>…</think>` tags are split into thinking deltas automatically, so the
+reasoning never leaks into the final answer.
 
 `QueueUpdateEvent` carries the current pending steering and follow-up prompt
 text. Use it for pending-message badges or status text. Queued prompts are not
@@ -274,6 +277,11 @@ Then clear and rebuild the visible transcript from `session.messages`.
 
 Keep the picker in the frontend package. The reusable agent harness should not
 know how sessions are displayed or selected.
+
+The built-in Textual app also renders a recent-sessions list in the left
+sidebar (newest first, with the active session marked). Each non-active title is
+a click target wired to a `switch_session` action that resumes that session, so
+the sidebar doubles as a switcher alongside the modal picker and `/resume`.
 
 ## Reference Adapter
 

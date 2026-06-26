@@ -98,6 +98,48 @@ async def test_recall_miss(tmp_path: Path) -> None:
 
 
 @pytest.mark.anyio
+async def test_recall_uses_semantic_similarity(tmp_path: Path, monkeypatch) -> None:
+    store = _store(tmp_path)
+    store.save_fact("Manas works as a machine learning engineer")
+    store.save_fact("Favorite color is teal")
+    tools = {t.name: t for t in create_memory_tools(store=store)}
+
+    table = {
+        "what is my job": [1.0, 0.0],
+        "Manas works as a machine learning engineer": [0.96, 0.2],
+        "Favorite color is teal": [0.0, 1.0],
+    }
+
+    async def fake_embed(texts, **kwargs):
+        return [table[text] for text in texts]
+
+    monkeypatch.setattr("phi_coding.memory_tools.embed_texts", fake_embed)
+
+    # "job" appears in no stored entry, so substring recall would miss it.
+    result = await tools["recall"].executor({"query": "what is my job"})
+    assert result.ok
+    assert "machine learning engineer" in result.content
+    assert "teal" not in result.content
+
+
+@pytest.mark.anyio
+async def test_recall_falls_back_to_substring_without_embeddings(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store = _store(tmp_path)
+    store.save_fact("API key lives in vault X")
+    tools = {t.name: t for t in create_memory_tools(store=store)}
+
+    async def no_embeddings(texts, **kwargs):
+        return None
+
+    monkeypatch.setattr("phi_coding.memory_tools.embed_texts", no_embeddings)
+    result = await tools["recall"].executor({"query": "vault"})
+    assert result.ok
+    assert "vault X" in result.content
+
+
+@pytest.mark.anyio
 async def test_update_profile_requires_content(tmp_path: Path) -> None:
     from phi_coding.tools import ToolInputError
 

@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from time import monotonic
+from typing import Any
 
 from phi_agent.tools import AgentTool, AgentToolResult, ToolCancellationToken, ToolExecutor
 from phi_agent.types import JSONValue
@@ -75,6 +76,7 @@ class ToolDefinition:
     prompt_guidelines: tuple[str, ...]
     input_schema: Mapping[str, JSONValue]
     executor: ToolExecutor
+    read_only: bool = False
 
     def to_agent_tool(self) -> AgentTool:
         return AgentTool(
@@ -84,6 +86,7 @@ class ToolDefinition:
             executor=self.executor,
             prompt_snippet=self.prompt_snippet,
             prompt_guidelines=self.prompt_guidelines,
+            read_only=self.read_only,
         )
 
 
@@ -241,6 +244,7 @@ def create_read_tool_definition(*, cwd: str | Path | None = None) -> ToolDefinit
             "required": ["path"],
         },
         executor=execute,
+        read_only=True,
     )
 
 
@@ -581,8 +585,10 @@ async def _communicate_with_cancellation(
 ) -> tuple[bytes, bytes | None, bool, bool]:
     communicate = asyncio.create_task(process.communicate())
     cancel_watch: asyncio.Task[None] | None = None
+    output_bytes: bytes
+    stderr: bytes | None
     try:
-        wait_for = {communicate}
+        wait_for: set[asyncio.Task[Any]] = {communicate}
         if signal is not None:
             cancel_watch = asyncio.create_task(_wait_for_cancel(signal))
             wait_for.add(cancel_watch)

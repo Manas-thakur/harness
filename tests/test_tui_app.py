@@ -396,6 +396,48 @@ def test_session_sidebar_renders_session_metadata() -> None:
     assert "review" in output
 
 
+def test_session_sidebar_lists_recent_sessions_with_active_marker() -> None:
+    session = FakeSession()
+    session.session_manager = _FakeSessionManager(
+        [
+            CodingSessionRecord(
+                id="s1",
+                path=Path("/tmp/s1.jsonl"),
+                cwd=session.cwd,
+                model="fake-model",
+                title="Refactor the loop",
+                created_at=1.0,
+                updated_at=3.0,
+            ),
+            CodingSessionRecord(
+                id="s2",
+                path=Path("/tmp/s2.jsonl"),
+                cwd=session.cwd,
+                model="fake-model",
+                title="Fix memory recall",
+                created_at=1.0,
+                updated_at=2.0,
+            ),
+        ]
+    )
+    session.session_id = "s1"
+    console = Console(record=True, width=80)
+
+    console.print(render_session_sidebar(session))
+
+    output = console.export_text()
+    assert "sessions" in output
+    assert "Refactor the loop" in output
+    assert "Fix memory recall" in output
+    assert "›" in output  # active-session marker
+
+
+def test_session_sidebar_handles_missing_session_history() -> None:
+    console = Console(record=True, width=80)
+    console.print(render_session_sidebar(FakeSession()))
+    assert "Session history unavailable" in console.export_text()
+
+
 def test_session_sidebar_uses_accented_aligned_headers_without_section_borders() -> None:
     console = Console(record=True, width=80)
     sidebar = render_session_sidebar(FakeSession())
@@ -2219,6 +2261,45 @@ async def test_tui_app_session_picker_resumes_selected_session() -> None:
 
 
 @pytest.mark.anyio
+async def test_tui_app_switch_session_action_resumes_from_sidebar() -> None:
+    session = FakeSession(messages=[UserMessage(content="Earlier")])
+    session.session_manager = _FakeSessionManager(
+        [
+            CodingSessionRecord(
+                id="session-1",
+                path=Path("/tmp/session-1.jsonl"),
+                cwd=Path("/workspace/project"),
+                model="fake-model",
+                title="Older session",
+                created_at=1.0,
+                updated_at=2.0,
+            )
+        ]
+    )
+    session.session_id = "current"
+    app = PhiTuiApp(session)
+
+    async with app.run_test() as pilot:
+        app.action_switch_session("session-1")
+        await pilot.pause()
+
+        assert session.resumed_session_ids == ["session-1"]
+
+
+@pytest.mark.anyio
+async def test_tui_app_switch_session_action_ignores_active_session() -> None:
+    session = FakeSession()
+    session.session_id = "current"
+    app = PhiTuiApp(session)
+
+    async with app.run_test() as pilot:
+        app.action_switch_session("current")
+        await pilot.pause()
+
+        assert session.resumed_session_ids == []
+
+
+@pytest.mark.anyio
 async def test_tui_app_session_picker_shows_human_readable_session_metadata() -> None:
     updated_at = datetime(2026, 6, 19, 14, 30).timestamp()
     session = FakeSession()
@@ -3681,23 +3762,24 @@ async def test_tui_app_toggles_thinking_tokens_from_keybinding_while_running() -
         app._refresh()
         await pilot.pause()
 
-        assert app.state.show_thinking is False
-        assert "final answer" in transcript_text()
-        assert "Thinking… Press Ctrl+T to show thinking tokens." in transcript_text()
-        assert "internal plan" not in transcript_text()
-
-        await pilot.press("ctrl+t")
-        await pilot.pause()
+        # Thinking is visible by default so reasoning streams between messages.
         assert app.state.show_thinking is True
-        assert app.state.running is True
+        assert "final answer" in transcript_text()
         assert "internal plan" in transcript_text()
         assert "Thinking… Press Ctrl+T to show thinking tokens." not in transcript_text()
 
         await pilot.press("ctrl+t")
         await pilot.pause()
         assert app.state.show_thinking is False
-        assert "Thinking… Press Ctrl+T to show thinking tokens." in transcript_text()
+        assert app.state.running is True
         assert "internal plan" not in transcript_text()
+        assert "Thinking… Press Ctrl+T to show thinking tokens." in transcript_text()
+
+        await pilot.press("ctrl+t")
+        await pilot.pause()
+        assert app.state.show_thinking is True
+        assert "internal plan" in transcript_text()
+        assert "Thinking… Press Ctrl+T to show thinking tokens." not in transcript_text()
 
     assert notifications == []
 

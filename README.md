@@ -16,12 +16,24 @@ src/phi_coding  the menace app: coding + research + memory tools, TUI, commands
 
 ## What it can do
 
-- **Code** — read, write, edit files, and run shell commands.
+- **Code** — read, write, edit files, and run shell commands. Independent
+  read-only calls (e.g. several `fetch_url`s) run concurrently; writes stay
+  sequential.
+- **Navigate a codebase** — `glob` (find files), `grep` (search contents), and
+  `ls` (list a directory) for fast, structured exploration without shelling out.
 - **Research the web** — `search_web`, `fetch_url`, and `read_pdf` so answers are
   grounded in real pages, not guesses.
+- **Use built-in skills** — packaged, detailed playbooks for `deep-research`,
+  `codebase-navigation`, `debugging`, `code-review`, `refactoring`, and `testing`,
+  invoked with `/skill:<name>` and overridable per project.
 - **Remember you** — a persistent profile (who you are, what you're working on,
   preferences) plus on-demand facts, written by the agent via `update_profile` /
-  `remember` and recalled across sessions.
+  `remember`. Recall is semantic (local embeddings via Ollama when available, with
+  a substring fallback), so paraphrased questions still find the right note.
+- **Show its thinking** — reasoning from thinking-capable models streams between
+  messages by default (toggle with `Ctrl+T`).
+- **Switch sessions** — the left sidebar lists recent sessions; click one (or use
+  `/resume`) to pick the conversation back up.
 - **Run on any model** — any local Ollama model, Ollama Cloud, or any OpenAI-/
   Anthropic-compatible provider, switchable live with `/model`.
 
@@ -166,6 +178,16 @@ menace keeps a per-project memory file under `~/.phi/sessions/<project>/memory.m
 when you share durable information, and the profile is auto-loaded into every new
 session. You generally don't manage it by hand — just tell menace about yourself
 and your project and it will remember.
+
+The `recall` tool ranks stored notes by **semantic similarity** using local
+embeddings (`nomic-embed-text` via the Ollama you already run), so a question
+like "what's my role?" matches a saved note even if it never says "role". If
+embeddings are unavailable (Ollama down or the model not pulled), recall falls
+back to case-insensitive substring matching — no setup required:
+
+```bash
+ollama pull nomic-embed-text   # optional: enables semantic recall
+```
 
 ## Development
 

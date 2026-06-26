@@ -22,6 +22,8 @@ An `AgentTool` has:
 - an `input_schema` describing accepted JSON arguments
 - an async `executor`
 - optional prompt metadata used by clients that assemble tool guidance
+- `read_only`: whether the tool only reads state and is safe to run concurrently
+  (default `False`)
 
 A tool returns an `AgentToolResult` with:
 
@@ -31,6 +33,17 @@ A tool returns an `AgentToolResult` with:
 - optional `error`: a machine-readable or user-readable error message
 
 The agent loop executes tool calls and converts results into `ToolResultMessage` entries in the transcript.
+
+### Concurrent execution of read-only tools
+
+When the assistant requests several tool calls in one turn, the loop runs a
+contiguous run of `read_only` tool calls concurrently and keeps mutating tools
+(such as `write`, `edit`, and `bash`) strictly sequential. Results are still
+appended to the transcript in the original request order, so concurrency never
+changes what the model sees — it only removes the latency of waiting for
+independent reads (for example, several `fetch_url` or `read` calls) one at a
+time. The built-in `read` tool sets `read_only=True`; `write`, `edit`, and
+`bash` do not.
 
 ## Built-in coding tools
 
@@ -317,9 +330,26 @@ Results include:
 - the command times out
 - the subprocess cannot be started
 
+## Codebase exploration tools
+
+The menace app layer also registers three read-only exploration tools
+(`create_codebase_tools()`), which improve how the agent reads and navigates a
+local project and benefit from concurrent read-only execution:
+
+- `glob` — find files by glob pattern (e.g. `**/*.py`), ignoring `.git`,
+  `node_modules`, virtualenvs, and cache directories.
+- `grep` — search file contents by regular expression, returning `path:line: text`;
+  skips binary files and noise directories, and accepts an optional file `glob`
+  filter and `case_insensitive` flag.
+- `ls` — list a directory's immediate entries (directories first, then files with
+  sizes).
+
+These are `read_only` and cwd-rooted. Prefer them over `bash` for exploration.
+
 ## Choosing the right tool
 
 - Use `read` to inspect file contents instead of shelling out to `cat` or `sed`.
+- Use `glob`/`grep`/`ls` to locate files and search code instead of `find`/`rg`.
 - Use `write` for new files or complete rewrites.
 - Use `edit` for precise changes to an existing file.
-- Use `bash` for commands such as tests, linters, searches, and project inspection.
+- Use `bash` for commands such as tests, linters, and project inspection.

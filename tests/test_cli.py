@@ -14,6 +14,7 @@ from phi_ai import (
 )
 from phi_coding import CodingSessionRecord, SessionManager, cli
 from phi_coding.cli import app, run_print_mode
+from phi_coding.codebase_tools import create_codebase_tools
 from phi_coding.memory_tools import create_memory_tools
 from phi_coding.ollama import OllamaModel
 from phi_coding.paths import PhiPaths
@@ -139,6 +140,7 @@ async def test_run_print_mode_prints_final_assistant_text(
             cwd=tmp_path,
             tools=[
                 *create_coding_tools(cwd=tmp_path),
+                *create_codebase_tools(cwd=tmp_path),
                 *create_research_tools(),
                 *create_memory_tools(cwd=tmp_path),
             ],
@@ -149,6 +151,9 @@ async def test_run_print_mode_prints_final_assistant_text(
         "write",
         "edit",
         "bash",
+        "glob",
+        "grep",
+        "ls",
         "search_web",
         "fetch_url",
         "read_pdf",

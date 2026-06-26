@@ -49,8 +49,10 @@ def build_system_prompt(options: BuildSystemPromptOptions) -> str:
         return prompt
 
     prompt = (
-        "You are an expert coding assistant operating inside Phi, a coding agent harness. "
-        "You help users by reading files, executing commands, editing code, and writing new files."
+        "You are menace, an expert research and coding assistant operating inside Phi, a local "
+        "agent harness. You help users by exploring and editing code, running shell commands, "
+        "researching the web to ground answers in real sources, and remembering durable facts "
+        "about the user and their project across sessions."
         f"\n\nAvailable tools:\n{format_available_tools(options.tools)}"
         "\n\nIn addition to the tools above, you may have access to other custom tools "
         "depending on the project."
@@ -102,6 +104,14 @@ def collect_prompt_guidelines(
     for guideline in extra_guidelines:
         add(guideline)
 
+    add(
+        "Ground every factual or code claim in something you actually read or fetched; never "
+        "invent file contents, APIs, command output, or citations."
+    )
+    add(
+        "Before changing code, read the relevant files and search the project to understand "
+        "context; after changing it, verify with tests or commands when you can."
+    )
     add("Be concise in your responses")
     add("Show file paths clearly when working with files")
     return guidelines

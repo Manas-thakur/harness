@@ -169,6 +169,50 @@ async def test_openai_compatible_provider_formats_request_and_streams_text() -> 
 
 
 @pytest.mark.anyio
+async def test_openai_compatible_provider_splits_inline_think_tags() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        del request
+        # The <think> block is split across chunks, including the tags
+        # themselves, to exercise cross-chunk buffering.
+        return httpx.Response(
+            200,
+            text=(
+                'data: {"choices":[{"delta":{"content":"<thi"}}]}\n\n'
+                'data: {"choices":[{"delta":{"content":"nk>plan the"}}]}\n\n'
+                'data: {"choices":[{"delta":{"content":" answer</think>Hello"}}]}\n\n'
+                'data: {"choices":[{"delta":{"content":" world"},"finish_reason":"stop"}]}\n\n'
+                "data: [DONE]\n\n"
+            ),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        provider = OpenAICompatibleProvider(
+            OpenAICompatibleConfig(api_key="test-key", base_url="https://example.test/v1"),
+            client=client,
+        )
+        events = await _collect(
+            provider.stream_response(
+                model="test-model",
+                system="You are Phi.",
+                messages=[UserMessage(content="hi")],
+                tools=[],
+            )
+        )
+
+    thinking = "".join(
+        event.delta for event in events if isinstance(event, ProviderThinkingDeltaEvent)
+    )
+    text = "".join(event.delta for event in events if isinstance(event, ProviderTextDeltaEvent))
+    assert thinking == "plan the answer"
+    assert text == "Hello world"
+    end = events[-1]
+    assert isinstance(end, ProviderResponseEndEvent)
+    # Reasoning is kept out of the persisted assistant message.
+    assert end.message.content == "Hello world"
+
+
+@pytest.mark.anyio
 async def test_openai_compatible_provider_retries_without_tools_when_unsupported() -> None:
     from phi_agent.tools import AgentTool
 

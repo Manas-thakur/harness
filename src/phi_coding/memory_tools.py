@@ -15,8 +15,12 @@ import anyio
 
 from phi_agent.tools import AgentTool, AgentToolResult, ToolCancellationToken
 from phi_agent.types import JSONValue
+from phi_coding.embeddings import cosine_similarity, embed_texts
 from phi_coding.memory import PROFILE_SECTIONS, MemoryStore, default_memory_path
 from phi_coding.tools import ToolDefinition, ToolInputError
+
+RECALL_RESULT_LIMIT = 8
+SEMANTIC_RECALL_THRESHOLD = 0.35
 
 
 def create_memory_tools(
@@ -126,7 +130,7 @@ def create_recall_tool_definition(store: MemoryStore) -> ToolDefinition:
     ) -> AgentToolResult:
         del signal
         query = _str_arg(arguments, "query")
-        matches = await anyio.to_thread.run_sync(store.search, query)
+        matches = await _recall_matches(store, query)
         if not matches:
             return AgentToolResult(
                 tool_call_id="",
@@ -153,4 +157,36 @@ def create_recall_tool_definition(store: MemoryStore) -> ToolDefinition:
             "required": ["query"],
         },
         executor=execute,
+        read_only=True,
     )
+
+
+async def _recall_matches(store: MemoryStore, query: str) -> list[str]:
+    """Rank stored memory by semantic similarity, falling back to substring.
+
+    Uses local Ollama embeddings when available so paraphrased queries still
+    match (e.g. "what's my job?" recalls a stored role). When embeddings are
+    unavailable, or nothing clears the similarity threshold, it returns the
+    plain case-insensitive substring matches so recall is never worse than the
+    original behavior.
+    """
+    entries = await anyio.to_thread.run_sync(store.entries)
+    substring = await anyio.to_thread.run_sync(store.search, query)
+    if not entries:
+        return substring
+
+    vectors = await embed_texts([query, *[entry for _section, entry in entries]])
+    if vectors is None:
+        return substring
+
+    query_vector, *entry_vectors = vectors
+    scored = sorted(
+        (
+            (cosine_similarity(query_vector, vector), f"[{section}] {entry}")
+            for (section, entry), vector in zip(entries, entry_vectors, strict=True)
+        ),
+        key=lambda item: item[0],
+        reverse=True,
+    )
+    ranked = [text for score, text in scored if score >= SEMANTIC_RECALL_THRESHOLD]
+    return ranked[:RECALL_RESULT_LIMIT] or substring

@@ -12,11 +12,51 @@ from phi_coding import (
     load_skills_with_diagnostics,
     parse_skill_invocation,
 )
-from phi_coding.resources import ResourceError
+from phi_coding.resources import BUILTIN_SKILLS_DIR, ResourceError
+
+BUILTIN_SKILL_NAMES = {
+    "codebase-navigation",
+    "code-review",
+    "debugging",
+    "deep-research",
+    "refactoring",
+    "testing",
+}
 
 
 def test_load_skills_missing_directory_returns_empty(tmp_path: Path) -> None:
     assert load_skills(PhiResourcePaths(root=tmp_path, agents_root=None)) == []
+
+
+def test_builtin_skills_are_present_and_described() -> None:
+    skills = {path.stem for path in BUILTIN_SKILLS_DIR.glob("*.md")}
+    assert skills >= BUILTIN_SKILL_NAMES
+
+
+def test_load_skills_includes_builtin_skills_when_enabled(tmp_path: Path) -> None:
+    skills = load_skills(
+        PhiResourcePaths(root=tmp_path, agents_root=None, include_builtin_skills=True)
+    )
+    names = {skill.name for skill in skills}
+    assert names >= BUILTIN_SKILL_NAMES
+    # Every built-in skill ships with a description for the prompt index.
+    by_name = {skill.name: skill for skill in skills}
+    assert all(by_name[name].description for name in BUILTIN_SKILL_NAMES)
+
+
+def test_user_skill_overrides_builtin_skill_of_same_name(tmp_path: Path) -> None:
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "debugging.md").write_text(
+        "---\ndescription: My custom debugging flow\n---\n# Debug\nLocal override.",
+        encoding="utf-8",
+    )
+    skills = load_skills(
+        PhiResourcePaths(root=tmp_path, agents_root=None, include_builtin_skills=True)
+    )
+    debugging = next(skill for skill in skills if skill.name == "debugging")
+    assert debugging.path == skills_dir / "debugging.md"
+    assert debugging.description == "My custom debugging flow"
 
 
 def test_load_skills_from_directory_and_file(tmp_path: Path) -> None:

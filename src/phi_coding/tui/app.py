@@ -782,7 +782,7 @@ class LoginProviderPickerScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         """Compose the provider picker."""
         with Vertical(id="login-provider-picker"):
-            yield Static(self.title, id="login-provider-title")
+            yield Static(self.title or "", id="login-provider-title")
             yield ListView(
                 *[
                     ListItem(Label(_login_provider_label(provider), markup=False))
@@ -2402,6 +2402,15 @@ class PhiTuiApp(App[None]):
         """Toggle thinking-token display in the transcript."""
         self.state.toggle_thinking()
         self._refresh()
+
+    def action_switch_session(self, session_id: str) -> None:
+        """Switch to another session from the sidebar's recent-sessions list."""
+        if self.state.running:
+            self._notify("Phi is already working. Press Escape to cancel.")
+            return
+        if session_id == getattr(self.session, "session_id", None):
+            return
+        self.run_worker(self._resume_session(session_id), exclusive=False)
 
     def _handle_session_picker_result(self, session_id: str | None) -> None:
         if session_id is None:

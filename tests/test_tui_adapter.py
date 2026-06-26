@@ -91,7 +91,7 @@ def test_tui_adapter_groups_thinking_deltas_separately() -> None:
     adapter.apply(ThinkingDeltaEvent(delta="reasoning"))
 
     assert [(item.role, item.text) for item in state.items] == [("thinking", "hidden reasoning")]
-    assert state.show_thinking is False
+    assert state.show_thinking is True
 
 
 def test_tui_adapter_flushes_assistant_buffer_before_tool_events() -> None:

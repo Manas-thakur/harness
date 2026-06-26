@@ -85,6 +85,12 @@ class MemoryStore:
                     matches.append(f"[{name}] {entry}")
         return matches
 
+    def entries(self) -> list[tuple[str, str]]:
+        """Return every stored bullet as ``(section, text)``, in document order."""
+        return [
+            (section, entry) for section, entries in self._sections().items() for entry in entries
+        ]
+
     # -- writing ---------------------------------------------------------
 
     def append_to_section(self, section: str, content: str) -> str:

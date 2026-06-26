@@ -134,6 +134,7 @@ class OpenAICompatibleProvider:
                         content_parts: list[str] = []
                         tool_call_builders: dict[int, _ToolCallBuilder] = {}
                         finish_reason: str | None = None
+                        think_splitter = _ThinkTagSplitter()
 
                         async for line in response.aiter_lines():
                             if signal is not None and signal.is_cancelled():
@@ -163,9 +164,13 @@ class OpenAICompatibleProvider:
 
                             content = delta.get("content")
                             if isinstance(content, str) and content:
-                                emitted_content = True
-                                content_parts.append(content)
-                                yield ProviderTextDeltaEvent(delta=content)
+                                for kind, segment in think_splitter.feed(content):
+                                    emitted_content = True
+                                    if kind == "text":
+                                        content_parts.append(segment)
+                                        yield ProviderTextDeltaEvent(delta=segment)
+                                    else:
+                                        yield ProviderThinkingDeltaEvent(delta=segment)
 
                             thinking = _thinking_delta_text(delta)
                             if thinking:
@@ -177,6 +182,14 @@ class OpenAICompatibleProvider:
                                 index = int(tool_call_delta.get("index", 0))
                                 builder = tool_call_builders.setdefault(index, _ToolCallBuilder())
                                 builder.add_delta(tool_call_delta)
+
+                        for kind, segment in think_splitter.flush():
+                            emitted_content = True
+                            if kind == "text":
+                                content_parts.append(segment)
+                                yield ProviderTextDeltaEvent(delta=segment)
+                            else:
+                                yield ProviderThinkingDeltaEvent(delta=segment)
 
                         tool_calls = [
                             builder.build(index)
@@ -380,6 +393,62 @@ def _thinking_delta_text(delta: Mapping[str, Any]) -> str:
         if isinstance(value, str) and value:
             return value
     return ""
+
+
+class _ThinkTagSplitter:
+    """Split streamed content into normal text and inline ``<think>`` reasoning.
+
+    Local reasoning models served through Ollama's OpenAI-compatible endpoint
+    (qwen3, deepseek-r1, …) emit their chain of thought inline in the content
+    stream wrapped in ``<think>``/``</think>`` tags rather than in a separate
+    reasoning field. This splitter routes that reasoning to thinking deltas and
+    keeps it out of the final answer, correctly handling tags that straddle SSE
+    chunk boundaries by holding back a possible partial tag until more text
+    arrives.
+    """
+
+    _OPEN = "<think>"
+    _CLOSE = "</think>"
+
+    def __init__(self) -> None:
+        self._pending = ""
+        self._in_think = False
+
+    def feed(self, delta: str) -> list[tuple[str, str]]:
+        """Consume a content fragment, returning ordered ``(kind, text)`` parts."""
+        self._pending += delta
+        return self._drain(final=False)
+
+    def flush(self) -> list[tuple[str, str]]:
+        """Return any remaining buffered text once the stream has ended."""
+        return self._drain(final=True)
+
+    def _drain(self, *, final: bool) -> list[tuple[str, str]]:
+        segments: list[tuple[str, str]] = []
+        while self._pending:
+            tag, kind = (self._CLOSE, "thinking") if self._in_think else (self._OPEN, "text")
+            index = self._pending.find(tag)
+            if index != -1:
+                if index > 0:
+                    segments.append((kind, self._pending[:index]))
+                self._pending = self._pending[index + len(tag) :]
+                self._in_think = not self._in_think
+                continue
+            hold = 0 if final else _partial_tag_suffix_len(self._pending, tag)
+            cut = len(self._pending) - hold
+            if cut > 0:
+                segments.append((kind, self._pending[:cut]))
+            self._pending = self._pending[cut:]
+            break
+        return segments
+
+
+def _partial_tag_suffix_len(text: str, tag: str) -> int:
+    """Return the length of the longest text suffix that is a prefix of ``tag``."""
+    for length in range(min(len(text), len(tag) - 1), 0, -1):
+        if text[-length:] == tag[:length]:
+            return length
+    return 0
 
 
 def _is_transient_status(status_code: int) -> bool:

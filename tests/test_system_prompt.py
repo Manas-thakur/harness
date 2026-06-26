@@ -30,7 +30,7 @@ def test_default_prompt_includes_tools_guidelines_date_and_cwd(tmp_path: Path) -
         )
     )
 
-    assert "You are an expert coding assistant operating inside Phi" in prompt
+    assert "You are menace, an expert research and coding assistant operating inside Phi" in prompt
     assert "Available tools:\n- read: Read file contents" in prompt
     assert "- Use bash for file operations like ls, rg, find" in prompt
     assert "- Use read to examine files instead of cat or sed." in prompt

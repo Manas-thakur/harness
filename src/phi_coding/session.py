@@ -33,6 +33,7 @@ from phi_agent.tools import AgentTool
 from phi_ai import ModelProvider
 from phi_ai.events import ProviderErrorEvent, ProviderResponseEndEvent, ProviderTextDeltaEvent
 from phi_coding.branch_summary import summarize_branch_messages_with_model
+from phi_coding.codebase_tools import create_codebase_tools
 from phi_coding.commands import CommandRegistry, CommandResult, create_default_command_registry
 from phi_coding.context import discover_project_context_with_diagnostics
 from phi_coding.context_window import (
@@ -260,6 +261,7 @@ class CodingSession:
             if config.tools is not None
             else [
                 *create_coding_tools(cwd=config.cwd),
+                *create_codebase_tools(cwd=config.cwd),
                 *create_research_tools(),
                 *create_memory_tools(cwd=config.cwd),
             ]

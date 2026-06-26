@@ -65,6 +65,13 @@ class AgentTool:
     executor: ToolExecutor
     prompt_snippet: str | None = None
     prompt_guidelines: tuple[str, ...] = ()
+    read_only: bool = False
+    """Whether this tool only reads state and is safe to run concurrently.
+
+    The agent loop may execute a contiguous run of read-only tool calls in
+    parallel. Tools that mutate files, run shell commands, or otherwise have
+    side effects must leave this ``False`` so they stay strictly sequential.
+    """
 
     async def execute(
         self,
